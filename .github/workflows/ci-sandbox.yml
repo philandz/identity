@@ -37,12 +37,14 @@ jobs:
         with:
           repository: philandz/protobuf
           path: protobuf
+          token: ${{ secrets.GH_REPO_PAT }}
 
       - name: Checkout libs repo
         uses: actions/checkout@v4
         with:
           repository: philandz/libs
           path: libs
+          token: ${{ secrets.GH_REPO_PAT }}
 
       - name: Install protoc
         run: |
