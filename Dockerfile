@@ -11,6 +11,8 @@ COPY Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY src ./src
 COPY migrations ./migrations
+COPY protobuf ./protobuf
+COPY libs ./libs
 
 RUN cargo build --release
 
