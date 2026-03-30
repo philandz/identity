@@ -1,4 +1,3 @@
-use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::{Duration, Utc};
 use tonic::Status;
 
@@ -29,13 +28,14 @@ impl IdentityBiz {
             .map_err(Self::map_internal_error)?
             .ok_or_else(|| Status::not_found("User not found"))?;
 
-        let valid =
-            verify(current_password, &db_user.password_hash).map_err(Self::map_internal_error)?;
+        let valid = philand_crypto::verify_password(current_password, &db_user.password_hash)
+            .map_err(Self::map_internal_error)?;
         if !valid {
             return Err(Status::unauthenticated("Current password is incorrect"));
         }
 
-        let new_hash = hash(new_password, DEFAULT_COST).map_err(Self::map_internal_error)?;
+        let new_hash =
+            philand_crypto::hash_password(new_password).map_err(Self::map_internal_error)?;
         self.repo
             .update_user_password(user_id, &new_hash)
             .await
@@ -77,6 +77,12 @@ impl IdentityBiz {
                 raw_token,
                 expires_at
             );
+
+            self.enqueue_notification(super::NotificationEvent::PasswordReset {
+                email: email.to_string(),
+                token: raw_token,
+            })
+            .await;
         } else {
             tracing::debug!("Forgot-password for unknown email: {}", email);
         }
@@ -103,7 +109,8 @@ impl IdentityBiz {
             .map_err(Self::map_internal_error)?
             .ok_or_else(|| Status::invalid_argument("Invalid or expired reset token"))?;
 
-        let new_hash = hash(new_password, DEFAULT_COST).map_err(Self::map_internal_error)?;
+        let new_hash =
+            philand_crypto::hash_password(new_password).map_err(Self::map_internal_error)?;
 
         self.repo
             .update_user_password(&reset_record.user_id, &new_hash)
@@ -121,8 +128,5 @@ impl IdentityBiz {
 
 /// Generate a cryptographically random 32-byte hex token.
 fn generate_random_token() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    hex::encode(bytes)
+    philand_random::random_string(64)
 }

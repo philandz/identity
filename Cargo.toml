@@ -14,8 +14,8 @@ serde_json = "1.0"
 thiserror = "1"
 anyhow = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
+reqwest = { version = "0.12", features = ["json"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 sqlx = { version = "0.7", features = ["mysql", "runtime-tokio", "macros", "chrono", "uuid", "migrate"] }
@@ -23,18 +23,26 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 headers = "0.4"
 jsonwebtoken = "9"
-bcrypt = "0.15"
-rand = "0.8"
 tonic = "0.12"
 prost = "0.13"
 prost-types = "0.13"
 tokio-stream = "0.1"
-reqwest = { version = "0.12", features = ["json"] }
-base64 = "0.22"
 utoipa = { version = "5", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
-sha2 = "0.10"
-hex = "0.4"
+philand_logging = { package = "logging", path = "../libs/logging" }
+philand_crypto = { package = "crypto", path = "../libs/crypto" }
+philand_random = { package = "random", path = "../libs/random" }
+philand_validator = { package = "validator", path = "../libs/validator" }
+philand_error = { package = "error", path = "../libs/error", features = ["utoipa"] }
+philand_configs = { package = "configs", path = "../libs/configs" }
+philand_storage = { package = "storage", path = "../libs/storage" }
+philand_table = { package = "table", path = "../libs/table" }
+philand_application = { package = "application", path = "../libs/application" }
+philand_env = { package = "env", path = "../libs/env" }
+philand_queue = { package = "queue", path = "../libs/queue" }
+philand_notify = { package = "notify", path = "../libs/notify" }
+philand_ssh = { package = "ssh", path = "../libs/ssh" }
+philand_time = { package = "time", path = "../libs/time" }
 
 [dev-dependencies]
 serial_test = "3"
