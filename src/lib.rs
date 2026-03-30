@@ -19,7 +19,6 @@ pub mod pb {
     }
 }
 
-pub mod config;
 pub mod converters;
 pub mod handler;
 pub mod manager;

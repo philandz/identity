@@ -1,4 +1,3 @@
-use bcrypt::{hash, verify, DEFAULT_COST};
 use chrono::{DateTime, Utc};
 use tonic::Status;
 
@@ -45,7 +44,8 @@ impl IdentityBiz {
         }
 
         let user_id = uuid::Uuid::new_v4().to_string();
-        let password_hash = hash(password, DEFAULT_COST).map_err(Self::map_internal_error)?;
+        let password_hash =
+            philand_crypto::hash_password(password).map_err(Self::map_internal_error)?;
 
         self.repo
             .insert_user(
@@ -74,7 +74,8 @@ impl IdentityBiz {
         let user_id = uuid::Uuid::new_v4().to_string();
         let org_id = uuid::Uuid::new_v4().to_string();
         let org_name = format!("{}'s Organization", display_name.trim());
-        let password_hash = hash(password, DEFAULT_COST).map_err(Self::map_internal_error)?;
+        let password_hash =
+            philand_crypto::hash_password(password).map_err(Self::map_internal_error)?;
 
         let db_user = self
             .repo
@@ -114,7 +115,8 @@ impl IdentityBiz {
             .map_err(Self::map_internal_error)?
             .ok_or_else(|| Status::unauthenticated("Invalid credentials"))?;
 
-        let valid = verify(password, &db_user.password_hash).map_err(Self::map_internal_error)?;
+        let valid = philand_crypto::verify_password(password, &db_user.password_hash)
+            .map_err(Self::map_internal_error)?;
         if !valid {
             return Err(Status::unauthenticated("Invalid credentials"));
         }

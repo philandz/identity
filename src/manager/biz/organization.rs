@@ -131,6 +131,13 @@ impl IdentityBiz {
             raw_token
         );
 
+        self.enqueue_notification(super::NotificationEvent::OrgInvitation {
+            email: normalized_email.clone(),
+            org_id: org_id.to_string(),
+            token: raw_token.clone(),
+        })
+        .await;
+
         Ok(InviteMemberResponse {
             invitation: Some(OrganizationInvitation {
                 id: invitation_id,
@@ -292,8 +299,5 @@ impl IdentityBiz {
 }
 
 fn generate_random_token() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    hex::encode(bytes)
+    philand_random::random_string(64)
 }
