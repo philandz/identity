@@ -577,7 +577,10 @@ impl IdentityRepository {
         params: UpsertOrganizationInvitationParams<'_>,
     ) -> Result<(), sqlx::Error> {
         let mut filters = Map::new();
-        filters.insert("org_id".to_string(), Value::String(params.org_id.to_string()));
+        filters.insert(
+            "org_id".to_string(),
+            Value::String(params.org_id.to_string()),
+        );
         filters.insert(
             "invitee_email".to_string(),
             Value::String(params.invitee_email.to_string()),
@@ -614,12 +617,19 @@ impl IdentityRepository {
             .is_some()
         {
             self.inner
-                .update(philand_table::table::ORGANIZATION_INVITATIONS, &data, &filters)
+                .update(
+                    philand_table::table::ORGANIZATION_INVITATIONS,
+                    &data,
+                    &filters,
+                )
                 .await
                 .map(|_| ())
                 .map_err(map_storage_error)
         } else {
-            data.insert("org_id".to_string(), Value::String(params.org_id.to_string()));
+            data.insert(
+                "org_id".to_string(),
+                Value::String(params.org_id.to_string()),
+            );
             data.insert(
                 "invitee_email".to_string(),
                 Value::String(params.invitee_email.to_string()),
@@ -697,10 +707,7 @@ impl IdentityRepository {
         role: OrgRole,
     ) -> Result<(), sqlx::Error> {
         let mut inv_data = Map::new();
-        inv_data.insert(
-            "status".to_string(),
-            Value::String("accepted".to_string()),
-        );
+        inv_data.insert("status".to_string(), Value::String("accepted".to_string()));
         let mut inv_filter = Map::new();
         inv_filter.insert("id".to_string(), Value::String(invitation_id.to_string()));
         self.inner
