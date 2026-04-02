@@ -14,12 +14,11 @@ use crate::manager::repository::IdentityRepository;
 pub enum NotificationEvent {
     PasswordReset {
         email: String,
-        token: String,
     },
     OrgInvitation {
         email: String,
         org_id: String,
-        token: String,
+        invitation_id: String,
     },
 }
 

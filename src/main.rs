@@ -159,14 +159,14 @@ fn spawn_notify_worker(mut rx: philand_queue::QueueReceiver<NotificationEvent>) 
         while let Some(event) = rx.recv().await {
             let ts = philand_time::now_unix();
             let text = match event {
-                NotificationEvent::PasswordReset { email, token } => {
-                    format!("[{ts}] Password reset requested for {email}. token={token}")
+                NotificationEvent::PasswordReset { email } => {
+                    format!("[{ts}] Password reset requested for {email}.")
                 }
                 NotificationEvent::OrgInvitation {
                     email,
                     org_id,
-                    token,
-                } => format!("[{ts}] Org invitation for {email} in {org_id}. token={token}"),
+                    invitation_id,
+                } => format!("[{ts}] Org invitation for {email} in {org_id}. id={invitation_id}"),
             };
 
             if telegram_enabled {
