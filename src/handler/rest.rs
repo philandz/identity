@@ -17,6 +17,7 @@ use tonic::Status;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::manager::biz::IdentityBiz;
+use philand_error::ErrorEnvelope as ErrorResponse;
 
 // ---------------------------------------------------------------------------
 // Shared app state
@@ -29,33 +30,9 @@ pub type HttpState = Arc<IdentityBiz>;
 // Error envelope (spec: { code, message, details })
 // ---------------------------------------------------------------------------
 
-#[derive(Serialize, ToSchema)]
-pub struct ErrorResponse {
-    pub code: String,
-    pub message: String,
-    pub details: Vec<String>,
-}
-
-impl ErrorResponse {
-    fn from_status(status: &Status) -> (StatusCode, Json<ErrorResponse>) {
-        let http_code = match status.code() {
-            tonic::Code::AlreadyExists => StatusCode::CONFLICT,
-            tonic::Code::Unauthenticated => StatusCode::UNAUTHORIZED,
-            tonic::Code::PermissionDenied => StatusCode::FORBIDDEN,
-            tonic::Code::NotFound => StatusCode::NOT_FOUND,
-            tonic::Code::InvalidArgument => StatusCode::BAD_REQUEST,
-            tonic::Code::FailedPrecondition => StatusCode::PRECONDITION_FAILED,
-            _ => StatusCode::INTERNAL_SERVER_ERROR,
-        };
-        (
-            http_code,
-            Json(ErrorResponse {
-                code: format!("{:?}", status.code()),
-                message: status.message().to_string(),
-                details: vec![],
-            }),
-        )
-    }
+fn map_status(status: &Status) -> (StatusCode, Json<ErrorResponse>) {
+    let (http_code, envelope) = philand_error::http_error_from_tonic_status(status);
+    (http_code, Json(envelope))
 }
 
 // ---------------------------------------------------------------------------
@@ -315,7 +292,7 @@ fn parse_org_role_label(value: &str) -> Result<i32, (StatusCode, Json<ErrorRespo
         "admin" => OrgRole::OrAdmin,
         "member" => OrgRole::OrMember,
         _ => {
-            return Err(ErrorResponse::from_status(&Status::invalid_argument(
+            return Err(map_status(&Status::invalid_argument(
                 "org_role must be one of: owner, admin, member",
             )));
         }
@@ -380,7 +357,7 @@ async fn register(
     let proto_resp = biz
         .register(&body.email, &body.password, &body.display_name)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     let user = proto_resp
         .user
@@ -415,7 +392,7 @@ async fn login(
     let proto_resp = biz
         .login(&body.email, &body.password)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     let organizations = proto_resp
         .organizations
@@ -457,7 +434,7 @@ async fn get_profile(
     let proto_resp = biz
         .get_profile(&user_id)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     let user = proto_resp
         .user
@@ -495,7 +472,7 @@ async fn list_organizations(
     let proto_resp = biz
         .list_organizations(&user_id)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     let organizations = proto_resp
         .organizations
@@ -530,7 +507,7 @@ async fn logout(
 
     biz.logout(&token, &claims.sub, claims.exp)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     Ok(Json(LogoutResponse {
         message: "Logged out successfully".to_string(),
@@ -559,7 +536,7 @@ async fn refresh_token(
     let proto_resp = biz
         .refresh_token(&token, &claims.sub, claims.exp)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     Ok(Json(RefreshTokenResponse {
         access_token: proto_resp.access_token,
@@ -590,7 +567,7 @@ async fn change_password(
 
     biz.change_password(&user_id, &body.current_password, &body.new_password)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     Ok(Json(ChangePasswordResponse {
         message: "Password changed successfully".to_string(),
@@ -617,7 +594,7 @@ async fn forgot_password(
     let proto_resp = biz
         .forgot_password(&body.email)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     Ok(Json(ForgotPasswordResponse {
         message: proto_resp.message,
@@ -643,7 +620,7 @@ async fn reset_password(
 ) -> Result<Json<ResetPasswordResponse>, (StatusCode, Json<ErrorResponse>)> {
     biz.reset_password(&body.token, &body.new_password)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     Ok(Json(ResetPasswordResponse {
         message: "Password has been reset successfully".to_string(),
@@ -672,7 +649,7 @@ async fn list_org_members(
     let proto_resp = biz
         .list_org_members(&user_id, &org_id)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     let members = proto_resp
         .members
@@ -717,11 +694,11 @@ async fn invite_member(
     let proto_resp = biz
         .invite_member(&user_id, &org_id, &body.invitee_email, org_role)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
-    let invitation = proto_resp.invitation.ok_or_else(|| {
-        ErrorResponse::from_status(&Status::internal("Invitation payload missing"))
-    })?;
+    let invitation = proto_resp
+        .invitation
+        .ok_or_else(|| map_status(&Status::internal("Invitation payload missing")))?;
 
     Ok(Json(InviteMemberResponse {
         invitation_id: invitation.id,
@@ -751,7 +728,7 @@ async fn accept_invitation(
     let proto_resp = biz
         .accept_invitation(&token)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     Ok(Json(AcceptInvitationResponse {
         org_id: proto_resp.org_id,
@@ -789,7 +766,7 @@ async fn change_org_member_role(
 
     biz.change_org_member_role(&caller_user_id, &org_id, &user_id, org_role)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     Ok(Json(SimpleMessageResponse {
         message: "Role updated successfully".to_string(),
@@ -822,7 +799,7 @@ async fn remove_org_member(
 
     biz.remove_org_member(&caller_user_id, &org_id, &user_id)
         .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+        .map_err(|e| map_status(&e))?;
 
     Ok(Json(SimpleMessageResponse {
         message: "Member removed successfully".to_string(),
@@ -840,20 +817,15 @@ async fn extract_user_id_from_jwt(
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| {
-            ErrorResponse::from_status(&Status::unauthenticated("Missing Authorization header"))
-        })?;
+        .ok_or_else(|| map_status(&Status::unauthenticated("Missing Authorization header")))?;
 
     let token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
-        ErrorResponse::from_status(&Status::unauthenticated(
+        map_status(&Status::unauthenticated(
             "Authorization header must start with 'Bearer '",
         ))
     })?;
 
-    let claims = biz
-        .verify_jwt(token)
-        .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+    let claims = biz.verify_jwt(token).await.map_err(|e| map_status(&e))?;
     Ok(claims.sub)
 }
 
@@ -865,20 +837,15 @@ async fn extract_token_and_claims(
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| {
-            ErrorResponse::from_status(&Status::unauthenticated("Missing Authorization header"))
-        })?;
+        .ok_or_else(|| map_status(&Status::unauthenticated("Missing Authorization header")))?;
 
     let token = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
-        ErrorResponse::from_status(&Status::unauthenticated(
+        map_status(&Status::unauthenticated(
             "Authorization header must start with 'Bearer '",
         ))
     })?;
 
-    let claims = biz
-        .verify_jwt(token)
-        .await
-        .map_err(|e| ErrorResponse::from_status(&e))?;
+    let claims = biz.verify_jwt(token).await.map_err(|e| map_status(&e))?;
     Ok((token.to_string(), claims))
 }
 

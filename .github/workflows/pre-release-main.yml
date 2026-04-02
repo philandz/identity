@@ -1,12 +1,12 @@
-name: identity-ci-sandbox
+name: identity-pre-release-main
 
 on:
   pull_request:
     branches:
-      - sandbox
+      - main
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     services:
       mysql:
@@ -26,7 +26,7 @@ jobs:
 
     env:
       DATABASE_URL: mysql://philand:philand@127.0.0.1:3306/philand
-      JWT_SECRET: sandbox-ci-secret
+      JWT_SECRET: prerelease-ci-secret
 
     steps:
       - name: Checkout

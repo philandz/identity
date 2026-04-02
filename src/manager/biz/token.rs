@@ -1,7 +1,6 @@
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use tonic::Status;
 
 use crate::converters::DbUser;
@@ -20,9 +19,7 @@ pub struct Claims {
 
 /// Compute the SHA-256 hex digest of an arbitrary string (JWT, reset token, etc.).
 pub fn hash_token(token: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
-    hex::encode(hasher.finalize())
+    philand_crypto::sha256_hex(token)
 }
 
 impl IdentityBiz {

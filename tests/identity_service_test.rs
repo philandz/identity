@@ -1,4 +1,3 @@
-use identity::config::AppConfig;
 use identity::handler::IdentityHandler;
 use identity::manager::biz::IdentityBiz;
 use identity::manager::repository::IdentityRepository;
@@ -25,6 +24,11 @@ fn with_bearer<T>(message: T, token: &str) -> Request<T> {
 /// Helper: boots a gRPC server on a random port and returns a connected client.
 async fn setup() -> (IdentityServiceClient<tonic::transport::Channel>, MySqlPool) {
     dotenvy::dotenv().ok();
+    std::env::set_var(
+        "JWT_SECRET",
+        std::env::var("JWT_SECRET").unwrap_or_else(|_| "test-secret".to_string()),
+    );
+    std::env::set_var("NOTIFY_ENABLED", "false");
 
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for integration tests");
@@ -58,9 +62,9 @@ async fn setup() -> (IdentityServiceClient<tonic::transport::Channel>, MySqlPool
         .await
         .unwrap();
 
-    let config = AppConfig::from_env();
-    let repo = IdentityRepository::new(Arc::new(pool.clone()));
-    let biz = Arc::new(IdentityBiz::new(repo, config));
+    let config = philand_configs::IdentityServiceConfig::from_env().expect("identity config");
+    let repo = IdentityRepository::from_pool(Arc::new(pool.clone()));
+    let biz = Arc::new(IdentityBiz::new(repo, config, None));
     let handler = IdentityHandler::new(biz);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
