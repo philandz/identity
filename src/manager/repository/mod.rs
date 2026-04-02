@@ -8,6 +8,7 @@ use crate::pb::shared::organization::{InvitationStatus, MemberStatus, OrgRole};
 use crate::pb::shared::user::UserType;
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value};
+use sqlx::Row;
 
 pub struct IdentityRepository {
     inner: philand_storage::repo::Repo,
@@ -53,14 +54,11 @@ pub struct UpsertOrganizationInvitationParams<'a> {
 
 impl IdentityRepository {
     pub async fn new(
-        _config: &philand_configs::IdentityServiceConfig,
+        config: &philand_configs::IdentityServiceConfig,
     ) -> Result<Self, philand_storage::StorageError> {
-        let database_url = std::env::var("DATABASE_URL").map_err(|e| {
-            philand_storage::StorageError::Sqlx(sqlx::Error::Configuration(e.into()))
-        })?;
         let pool = std::sync::Arc::new(
             sqlx::mysql::MySqlPoolOptions::new()
-                .connect(&database_url)
+                .connect(&config.database_url)
                 .await
                 .map_err(philand_storage::StorageError::Sqlx)?,
         );
@@ -77,108 +75,10 @@ impl IdentityRepository {
     }
 
     async fn ensure_tables(&self) -> Result<(), philand_storage::StorageError> {
-        let users = table_name(philand_table::table::USERS);
-        let organizations = table_name(philand_table::table::ORGANIZATIONS);
-        let organization_members = table_name(philand_table::table::ORGANIZATION_MEMBERS);
-        let revoked_tokens = table_name(philand_table::table::REVOKED_TOKENS);
-        let password_reset_tokens = table_name(philand_table::table::PASSWORD_RESET_TOKENS);
-        let organization_invitations = table_name(philand_table::table::ORGANIZATION_INVITATIONS);
-
-        let create_users = format!(
-            "CREATE TABLE IF NOT EXISTS {users} (
-                id VARCHAR(36) PRIMARY KEY,
-                email VARCHAR(255) NOT NULL UNIQUE,
-                password_hash VARCHAR(255) NOT NULL,
-                display_name VARCHAR(255) NOT NULL,
-                user_type VARCHAR(20) NOT NULL COMMENT 'normal | super_admin',
-                status VARCHAR(20) NOT NULL COMMENT 'active | disabled',
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                deleted_at TIMESTAMP NULL,
-                created_by VARCHAR(36),
-                updated_by VARCHAR(36),
-                UNIQUE KEY uk_users_email (email)
-            )"
-        );
-
-        let create_orgs = format!(
-            "CREATE TABLE IF NOT EXISTS {organizations} (
-                id VARCHAR(36) PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
-                owner_user_id VARCHAR(36) NOT NULL,
-                status VARCHAR(20) NOT NULL COMMENT 'active | disabled',
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                deleted_at TIMESTAMP NULL,
-                created_by VARCHAR(36),
-                updated_by VARCHAR(36),
-                FOREIGN KEY (owner_user_id) REFERENCES {users} (id)
-            )"
-        );
-
-        let create_org_members = format!(
-            "CREATE TABLE IF NOT EXISTS {organization_members} (
-                org_id VARCHAR(36) NOT NULL,
-                user_id VARCHAR(36) NOT NULL,
-                org_role VARCHAR(20) NOT NULL COMMENT 'owner | admin | member',
-                status VARCHAR(20) NOT NULL COMMENT 'active | invited',
-                joined_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (org_id, user_id),
-                UNIQUE KEY uk_org_user (org_id, user_id),
-                FOREIGN KEY (org_id) REFERENCES {organizations} (id) ON DELETE CASCADE,
-                FOREIGN KEY (user_id) REFERENCES {users} (id) ON DELETE CASCADE
-            )"
-        );
-
-        let create_revoked_tokens = format!(
-            "CREATE TABLE IF NOT EXISTS {revoked_tokens} (
-                token_hash VARCHAR(64) PRIMARY KEY,
-                user_id VARCHAR(36) NOT NULL,
-                expires_at TIMESTAMP NOT NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES {users}(id) ON DELETE CASCADE
-            )"
-        );
-
-        let create_password_reset_tokens = format!(
-            "CREATE TABLE IF NOT EXISTS {password_reset_tokens} (
-                id VARCHAR(36) PRIMARY KEY,
-                user_id VARCHAR(36) NOT NULL,
-                token_hash VARCHAR(64) NOT NULL UNIQUE,
-                expires_at TIMESTAMP NOT NULL,
-                used_at TIMESTAMP NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES {users}(id) ON DELETE CASCADE
-            )"
-        );
-
-        let create_org_invitations = format!(
-            "CREATE TABLE IF NOT EXISTS {organization_invitations} (
-                id VARCHAR(36) PRIMARY KEY,
-                org_id VARCHAR(36) NOT NULL,
-                inviter_id VARCHAR(36) NOT NULL,
-                invitee_email VARCHAR(255) NOT NULL,
-                org_role VARCHAR(20) NOT NULL COMMENT 'admin | member',
-                token_hash VARCHAR(64) NOT NULL UNIQUE,
-                status VARCHAR(20) NOT NULL COMMENT 'pending | accepted | expired | revoked',
-                expires_at TIMESTAMP NOT NULL,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                FOREIGN KEY (org_id) REFERENCES {organizations}(id) ON DELETE CASCADE,
-                FOREIGN KEY (inviter_id) REFERENCES {users}(id) ON DELETE CASCADE,
-                UNIQUE KEY uk_org_email (org_id, invitee_email),
-                UNIQUE KEY uk_invitation_token (token_hash)
-            )"
-        );
-
-        self.inner.execute(&create_users).await?;
-        self.inner.execute(&create_orgs).await?;
-        self.inner.execute(&create_org_members).await?;
-        self.inner.execute(&create_revoked_tokens).await?;
-        self.inner.execute(&create_password_reset_tokens).await?;
-        self.inner.execute(&create_org_invitations).await?;
-
-        Ok(())
+        sqlx::migrate!("./migrations")
+            .run(&*self.pool)
+            .await
+            .map_err(|e| philand_storage::StorageError::Sqlx(e.into()))
     }
 
     pub async fn insert_user(
@@ -365,36 +265,32 @@ impl IdentityRepository {
         &self,
         user_id: &str,
     ) -> Result<Vec<OrgSummaryRow>, sqlx::Error> {
-        let mut filters = Map::new();
-        filters.insert("user_id".to_string(), Value::String(user_id.to_string()));
-        filters.insert(
-            "status".to_string(),
-            Value::String(member_status_to_db(MemberStatus::MsActive).to_string()),
-        );
-        let memberships = self
-            .inner
-            .list(philand_table::table::ORGANIZATION_MEMBERS, &filters)
-            .await
-            .map_err(map_storage_error)?;
+        let org_members = table_name(philand_table::table::ORGANIZATION_MEMBERS);
+        let organizations = table_name(philand_table::table::ORGANIZATIONS);
+        let active_status = member_status_to_db(MemberStatus::MsActive);
 
-        let mut out = Vec::new();
-        for m in memberships {
-            let org_id = string_field(&m, "org_id");
-            let mut org_filter = Map::new();
-            org_filter.insert("id".to_string(), Value::String(org_id.clone()));
-            if let Some(org) = self
-                .inner
-                .get(philand_table::table::ORGANIZATIONS, &org_filter)
-                .await
-                .map_err(map_storage_error)?
-            {
-                out.push(OrgSummaryRow {
-                    id: org_id,
-                    name: string_field(&org, "name"),
-                    role: org_role_from_db(&string_field(&m, "org_role")),
-                });
-            }
-        }
+        let rows = sqlx::query(&format!(
+            "SELECT om.org_id, om.org_role, o.name \
+             FROM {org_members} om \
+             INNER JOIN {organizations} o ON om.org_id = o.id \
+             WHERE om.user_id = ? AND om.status = ?"
+        ))
+        .bind(user_id)
+        .bind(active_status)
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let out = rows
+            .into_iter()
+            .map(|row| -> Result<OrgSummaryRow, sqlx::Error> {
+                Ok(OrgSummaryRow {
+                    id: row.try_get("org_id")?,
+                    name: row.try_get("name")?,
+                    role: org_role_from_db(&row.try_get::<String, _>("org_role")?),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         Ok(out)
     }
 
@@ -402,33 +298,20 @@ impl IdentityRepository {
         &self,
         user_id: &str,
     ) -> Result<Vec<DbOrganization>, sqlx::Error> {
-        let mut filters = Map::new();
-        filters.insert("user_id".to_string(), Value::String(user_id.to_string()));
-        filters.insert(
-            "status".to_string(),
-            Value::String(member_status_to_db(MemberStatus::MsActive).to_string()),
-        );
-        let memberships = self
-            .inner
-            .list(philand_table::table::ORGANIZATION_MEMBERS, &filters)
-            .await
-            .map_err(map_storage_error)?;
+        let org_members = table_name(philand_table::table::ORGANIZATION_MEMBERS);
+        let organizations = table_name(philand_table::table::ORGANIZATIONS);
+        let active_status = member_status_to_db(MemberStatus::MsActive);
 
-        let mut out = Vec::new();
-        for m in memberships {
-            let org_id = string_field(&m, "org_id");
-            let mut org_filter = Map::new();
-            org_filter.insert("id".to_string(), Value::String(org_id));
-            if let Some(org) = self
-                .inner
-                .get(philand_table::table::ORGANIZATIONS, &org_filter)
-                .await
-                .map_err(map_storage_error)?
-            {
-                out.push(map_to_db_organization(org));
-            }
-        }
-        Ok(out)
+        sqlx::query_as::<_, DbOrganization>(&format!(
+            "SELECT o.* \
+             FROM {organizations} o \
+             INNER JOIN {org_members} om ON o.id = om.org_id \
+             WHERE om.user_id = ? AND om.status = ?"
+        ))
+        .bind(user_id)
+        .bind(active_status)
+        .fetch_all(&*self.pool)
+        .await
     }
 
     pub async fn insert_revoked_token(
@@ -580,36 +463,37 @@ impl IdentityRepository {
     }
 
     pub async fn list_org_members(&self, org_id: &str) -> Result<Vec<OrgMemberRow>, sqlx::Error> {
-        let mut filters = Map::new();
-        filters.insert("org_id".to_string(), Value::String(org_id.to_string()));
-        let rows = self
-            .inner
-            .list(philand_table::table::ORGANIZATION_MEMBERS, &filters)
-            .await
-            .map_err(map_storage_error)?;
+        let org_members = table_name(philand_table::table::ORGANIZATION_MEMBERS);
+        let users = table_name(philand_table::table::USERS);
 
-        let mut out = Vec::new();
-        for m in rows {
-            let user_id = string_field(&m, "user_id");
-            let mut uf = Map::new();
-            uf.insert("id".to_string(), Value::String(user_id.clone()));
-            if let Some(u) = self
-                .inner
-                .get(philand_table::table::USERS, &uf)
-                .await
-                .map_err(map_storage_error)?
-            {
-                out.push(OrgMemberRow {
-                    user_id,
-                    email: string_field(&u, "email"),
-                    display_name: string_field(&u, "display_name"),
-                    role: org_role_from_db(&string_field(&m, "org_role")),
-                    status: member_status_from_db(&string_field(&m, "status")),
-                    joined_at: datetime_field(&m, "joined_at").timestamp(),
-                });
-            }
-        }
-        out.sort_by_key(|r| r.joined_at);
+        let rows = sqlx::query(&format!(
+            "SELECT om.user_id, u.email, u.display_name, om.org_role, om.status, om.joined_at \
+             FROM {org_members} om \
+             INNER JOIN {users} u ON om.user_id = u.id \
+             WHERE om.org_id = ? \
+             ORDER BY om.joined_at ASC"
+        ))
+        .bind(org_id)
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let out = rows
+            .into_iter()
+            .map(|row| -> Result<OrgMemberRow, sqlx::Error> {
+                Ok(OrgMemberRow {
+                    user_id: row.try_get("user_id")?,
+                    email: row.try_get("email")?,
+                    display_name: row.try_get("display_name")?,
+                    role: org_role_from_db(&row.try_get::<String, _>("org_role")?),
+                    status: member_status_from_db(&row.try_get::<String, _>("status")?),
+                    joined_at: row
+                        .try_get::<DateTime<Utc>, _>("joined_at")
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         Ok(out)
     }
 
@@ -617,70 +501,33 @@ impl IdentityRepository {
         &self,
         params: UpsertOrganizationInvitationParams<'_>,
     ) -> Result<(), sqlx::Error> {
-        let mut filters = Map::new();
-        filters.insert(
-            "org_id".to_string(),
-            Value::String(params.org_id.to_string()),
-        );
-        filters.insert(
-            "invitee_email".to_string(),
-            Value::String(params.invitee_email.to_string()),
-        );
+        // Atomic upsert via INSERT … ON DUPLICATE KEY UPDATE.
+        // Relies on UNIQUE KEY uk_org_email (org_id, invitee_email) in organization_invitations.
+        let invitations = table_name(philand_table::table::ORGANIZATION_INVITATIONS);
 
-        let mut data = Map::new();
-        data.insert("id".to_string(), Value::String(params.id.to_string()));
-        data.insert(
-            "inviter_id".to_string(),
-            Value::String(params.inviter_id.to_string()),
-        );
-        data.insert(
-            "org_role".to_string(),
-            Value::String(org_role_to_db(params.org_role).to_string()),
-        );
-        data.insert(
-            "token_hash".to_string(),
-            Value::String(params.token_hash.to_string()),
-        );
-        data.insert(
-            "status".to_string(),
-            Value::String(invitation_status_to_db(params.status).to_string()),
-        );
-        data.insert(
-            "expires_at".to_string(),
-            Value::String(fmt_db_time(params.expires_at)),
-        );
-
-        if self
-            .inner
-            .get(philand_table::table::ORGANIZATION_INVITATIONS, &filters)
-            .await
-            .map_err(map_storage_error)?
-            .is_some()
-        {
-            self.inner
-                .update(
-                    philand_table::table::ORGANIZATION_INVITATIONS,
-                    &data,
-                    &filters,
-                )
-                .await
-                .map(|_| ())
-                .map_err(map_storage_error)
-        } else {
-            data.insert(
-                "org_id".to_string(),
-                Value::String(params.org_id.to_string()),
-            );
-            data.insert(
-                "invitee_email".to_string(),
-                Value::String(params.invitee_email.to_string()),
-            );
-            self.inner
-                .create(philand_table::table::ORGANIZATION_INVITATIONS, &data)
-                .await
-                .map(|_| ())
-                .map_err(map_storage_error)
-        }
+        sqlx::query(&format!(
+            "INSERT INTO {invitations} \
+             (id, org_id, inviter_id, invitee_email, org_role, token_hash, status, expires_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+             ON DUPLICATE KEY UPDATE \
+               id = VALUES(id), \
+               inviter_id = VALUES(inviter_id), \
+               org_role = VALUES(org_role), \
+               token_hash = VALUES(token_hash), \
+               status = VALUES(status), \
+               expires_at = VALUES(expires_at)"
+        ))
+        .bind(params.id)
+        .bind(params.org_id)
+        .bind(params.inviter_id)
+        .bind(params.invitee_email)
+        .bind(org_role_to_db(params.org_role))
+        .bind(params.token_hash)
+        .bind(invitation_status_to_db(params.status))
+        .bind(fmt_db_time(params.expires_at))
+        .execute(&*self.pool)
+        .await
+        .map(|_| ())
     }
 
     pub async fn find_valid_invitation_by_token(
@@ -817,6 +664,8 @@ impl IdentityRepository {
 fn map_storage_error(err: philand_storage::StorageError) -> sqlx::Error {
     match err {
         philand_storage::StorageError::Sqlx(e) => e,
+        // sqlx 0.7 does not expose an `Other` variant; Protocol is the closest
+        // semantic fit for non-database errors surfaced through the storage layer.
         other => sqlx::Error::Protocol(other.to_string()),
     }
 }
@@ -828,20 +677,6 @@ fn map_to_db_user(row: Map<String, Value>) -> DbUser {
         password_hash: string_field(&row, "password_hash"),
         display_name: string_field(&row, "display_name"),
         user_type: string_field(&row, "user_type"),
-        status: string_field(&row, "status"),
-        created_at: datetime_field(&row, "created_at"),
-        updated_at: datetime_field(&row, "updated_at"),
-        deleted_at: opt_datetime_field(&row, "deleted_at"),
-        created_by: opt_string_field(&row, "created_by"),
-        updated_by: opt_string_field(&row, "updated_by"),
-    }
-}
-
-fn map_to_db_organization(row: Map<String, Value>) -> DbOrganization {
-    DbOrganization {
-        id: string_field(&row, "id"),
-        name: string_field(&row, "name"),
-        owner_user_id: string_field(&row, "owner_user_id"),
         status: string_field(&row, "status"),
         created_at: datetime_field(&row, "created_at"),
         updated_at: datetime_field(&row, "updated_at"),
@@ -876,7 +711,13 @@ fn opt_string_field(row: &Map<String, Value>, key: &str) -> Option<String> {
 }
 
 fn datetime_field(row: &Map<String, Value>, key: &str) -> DateTime<Utc> {
-    opt_datetime_field(row, key).unwrap_or_else(Utc::now)
+    opt_datetime_field(row, key).unwrap_or_else(|| {
+        tracing::warn!(
+            "Missing or unparseable datetime field '{}'; using epoch as sentinel",
+            key
+        );
+        DateTime::<Utc>::UNIX_EPOCH
+    })
 }
 
 fn opt_datetime_field(row: &Map<String, Value>, key: &str) -> Option<DateTime<Utc>> {

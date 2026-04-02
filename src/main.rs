@@ -154,6 +154,13 @@ fn spawn_notify_worker(mut rx: philand_queue::QueueReceiver<NotificationEvent>) 
     let bot_token = std::env::var("NOTIFY_TELEGRAM_BOT_TOKEN").ok();
     let chat_id = std::env::var("NOTIFY_TELEGRAM_CHAT_ID").ok();
 
+    if telegram_enabled && (bot_token.is_none() || chat_id.is_none()) {
+        tracing::warn!(
+            "NOTIFY_TELEGRAM_ENABLED=true but NOTIFY_TELEGRAM_BOT_TOKEN / \
+             NOTIFY_TELEGRAM_CHAT_ID are not set — Telegram notifications will be silently dropped"
+        );
+    }
+
     tokio::spawn(async move {
         let client = reqwest::Client::new();
         while let Some(event) = rx.recv().await {
