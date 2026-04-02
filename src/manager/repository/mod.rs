@@ -11,6 +11,7 @@ use serde_json::{Map, Value};
 
 pub struct IdentityRepository {
     inner: philand_storage::repo::Repo,
+    pool: std::sync::Arc<sqlx::Pool<sqlx::MySql>>,
 }
 
 pub struct OrgSummaryRow {
@@ -52,17 +53,26 @@ pub struct UpsertOrganizationInvitationParams<'a> {
 
 impl IdentityRepository {
     pub async fn new(
-        config: &philand_configs::IdentityServiceConfig,
+        _config: &philand_configs::IdentityServiceConfig,
     ) -> Result<Self, philand_storage::StorageError> {
-        let inner = philand_storage::repo::Repo::new_repo(config).await?;
-        let repo = Self { inner };
+        let database_url = std::env::var("DATABASE_URL").map_err(|e| {
+            philand_storage::StorageError::Sqlx(sqlx::Error::Configuration(e.into()))
+        })?;
+        let pool = std::sync::Arc::new(
+            sqlx::mysql::MySqlPoolOptions::new()
+                .connect(&database_url)
+                .await
+                .map_err(philand_storage::StorageError::Sqlx)?,
+        );
+        let repo = Self::from_pool(pool);
         repo.ensure_tables().await?;
         Ok(repo)
     }
 
     pub fn from_pool(pool: std::sync::Arc<sqlx::Pool<sqlx::MySql>>) -> Self {
         Self {
-            inner: philand_storage::repo::Repo::from_pool(pool),
+            inner: philand_storage::repo::Repo::from_pool(pool.clone()),
+            pool,
         }
     }
 
@@ -221,32 +231,45 @@ impl IdentityRepository {
         org_role: OrgRole,
         membership_status: MemberStatus,
     ) -> Result<DbUser, sqlx::Error> {
-        self.insert_user(
-            user_id,
-            email,
-            password_hash,
-            display_name,
-            user_type,
-            user_status,
-        )
+        let users = table_name(philand_table::table::USERS);
+        let organizations = table_name(philand_table::table::ORGANIZATIONS);
+        let organization_members = table_name(philand_table::table::ORGANIZATION_MEMBERS);
+
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(&format!(
+            "INSERT INTO {users} (id, email, password_hash, display_name, user_type, status) VALUES (?, ?, ?, ?, ?, ?)"
+        ))
+        .bind(user_id)
+        .bind(email)
+        .bind(password_hash)
+        .bind(display_name)
+        .bind(user_type_to_db(user_type))
+        .bind(base_status_to_db(user_status))
+        .execute(&mut *tx)
         .await?;
 
-        if let Err(err) = self
-            .insert_organization(org_id, org_name, user_id, BaseStatus::BsActive)
-            .await
-        {
-            let _ = self.delete_user_by_id(user_id).await;
-            return Err(err);
-        }
+        sqlx::query(&format!(
+            "INSERT INTO {organizations} (id, name, owner_user_id, status) VALUES (?, ?, ?, ?)"
+        ))
+        .bind(org_id)
+        .bind(org_name)
+        .bind(user_id)
+        .bind(base_status_to_db(BaseStatus::BsActive))
+        .execute(&mut *tx)
+        .await?;
 
-        if let Err(err) = self
-            .insert_organization_member(org_id, user_id, org_role, membership_status)
-            .await
-        {
-            let _ = self.delete_organization_by_id(org_id).await;
-            let _ = self.delete_user_by_id(user_id).await;
-            return Err(err);
-        }
+        sqlx::query(&format!(
+            "INSERT INTO {organization_members} (org_id, user_id, org_role, status) VALUES (?, ?, ?, ?)"
+        ))
+        .bind(org_id)
+        .bind(user_id)
+        .bind(org_role_to_db(org_role))
+        .bind(member_status_to_db(membership_status))
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
 
         self.find_user_by_id(user_id)
             .await?
@@ -344,7 +367,10 @@ impl IdentityRepository {
     ) -> Result<Vec<OrgSummaryRow>, sqlx::Error> {
         let mut filters = Map::new();
         filters.insert("user_id".to_string(), Value::String(user_id.to_string()));
-        filters.insert("status".to_string(), Value::String("active".to_string()));
+        filters.insert(
+            "status".to_string(),
+            Value::String(member_status_to_db(MemberStatus::MsActive).to_string()),
+        );
         let memberships = self
             .inner
             .list(philand_table::table::ORGANIZATION_MEMBERS, &filters)
@@ -378,7 +404,10 @@ impl IdentityRepository {
     ) -> Result<Vec<DbOrganization>, sqlx::Error> {
         let mut filters = Map::new();
         filters.insert("user_id".to_string(), Value::String(user_id.to_string()));
-        filters.insert("status".to_string(), Value::String("active".to_string()));
+        filters.insert(
+            "status".to_string(),
+            Value::String(member_status_to_db(MemberStatus::MsActive).to_string()),
+        );
         let memberships = self
             .inner
             .list(philand_table::table::ORGANIZATION_MEMBERS, &filters)
@@ -418,11 +447,19 @@ impl IdentityRepository {
             "expires_at".to_string(),
             Value::String(fmt_db_time(expires_at)),
         );
-        self.inner
+        let res = self
+            .inner
             .create(philand_table::table::REVOKED_TOKENS, &data)
             .await
             .map(|_| ())
-            .map_err(map_storage_error)
+            .map_err(map_storage_error);
+
+        match res {
+            Ok(()) => Ok(()),
+            // Token is already revoked — idempotent, treat as success.
+            Err(e) if self.is_unique_violation(&e) => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 
     pub async fn is_token_revoked(&self, token_hash: &str) -> Result<bool, sqlx::Error> {
@@ -530,7 +567,10 @@ impl IdentityRepository {
         let mut filters = Map::new();
         filters.insert("org_id".to_string(), Value::String(org_id.to_string()));
         filters.insert("user_id".to_string(), Value::String(user_id.to_string()));
-        filters.insert("status".to_string(), Value::String("active".to_string()));
+        filters.insert(
+            "status".to_string(),
+            Value::String(member_status_to_db(MemberStatus::MsActive).to_string()),
+        );
         let row = self
             .inner
             .get(philand_table::table::ORGANIZATION_MEMBERS, &filters)
@@ -569,6 +609,7 @@ impl IdentityRepository {
                 });
             }
         }
+        out.sort_by_key(|r| r.joined_at);
         Ok(out)
     }
 
@@ -690,7 +731,10 @@ impl IdentityRepository {
         let mut filters = Map::new();
         filters.insert("org_id".to_string(), Value::String(org_id.to_string()));
         filters.insert("user_id".to_string(), Value::String(user.id));
-        filters.insert("status".to_string(), Value::String("active".to_string()));
+        filters.insert(
+            "status".to_string(),
+            Value::String(member_status_to_db(MemberStatus::MsActive).to_string()),
+        );
         Ok(self
             .inner
             .get(philand_table::table::ORGANIZATION_MEMBERS, &filters)
@@ -706,52 +750,33 @@ impl IdentityRepository {
         user_id: &str,
         role: OrgRole,
     ) -> Result<(), sqlx::Error> {
-        let mut inv_data = Map::new();
-        inv_data.insert("status".to_string(), Value::String("accepted".to_string()));
-        let mut inv_filter = Map::new();
-        inv_filter.insert("id".to_string(), Value::String(invitation_id.to_string()));
-        self.inner
-            .update(
-                philand_table::table::ORGANIZATION_INVITATIONS,
-                &inv_data,
-                &inv_filter,
-            )
-            .await
-            .map_err(map_storage_error)?;
+        let invitations = table_name(philand_table::table::ORGANIZATION_INVITATIONS);
+        let members = table_name(philand_table::table::ORGANIZATION_MEMBERS);
 
-        let mut member_filter = Map::new();
-        member_filter.insert("org_id".to_string(), Value::String(org_id.to_string()));
-        member_filter.insert("user_id".to_string(), Value::String(user_id.to_string()));
-        let mut member_data = Map::new();
-        member_data.insert(
-            "org_role".to_string(),
-            Value::String(org_role_to_db(role).to_string()),
-        );
-        member_data.insert("status".to_string(), Value::String("active".to_string()));
+        let mut tx = self.pool.begin().await?;
 
-        if self
-            .inner
-            .get(philand_table::table::ORGANIZATION_MEMBERS, &member_filter)
-            .await
-            .map_err(map_storage_error)?
-            .is_some()
-        {
-            self.inner
-                .update(
-                    philand_table::table::ORGANIZATION_MEMBERS,
-                    &member_data,
-                    &member_filter,
-                )
-                .await
-                .map_err(map_storage_error)?;
-        } else {
-            member_data.insert("org_id".to_string(), Value::String(org_id.to_string()));
-            member_data.insert("user_id".to_string(), Value::String(user_id.to_string()));
-            self.inner
-                .create(philand_table::table::ORGANIZATION_MEMBERS, &member_data)
-                .await
-                .map_err(map_storage_error)?;
-        }
+        sqlx::query(&format!(
+            "UPDATE {invitations} SET status = ? WHERE id = ?"
+        ))
+        .bind(invitation_status_to_db(InvitationStatus::IsAccepted))
+        .bind(invitation_id)
+        .execute(&mut *tx)
+        .await?;
+
+        // Upsert membership atomically.
+        // Relies on the PRIMARY KEY (org_id, user_id) in organization_members.
+        sqlx::query(&format!(
+            "INSERT INTO {members} (org_id, user_id, org_role, status) VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE org_role = VALUES(org_role), status = VALUES(status)"
+        ))
+        .bind(org_id)
+        .bind(user_id)
+        .bind(org_role_to_db(role))
+        .bind(member_status_to_db(MemberStatus::MsActive))
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
 
         Ok(())
     }
@@ -770,7 +795,10 @@ impl IdentityRepository {
         let mut filters = Map::new();
         filters.insert("org_id".to_string(), Value::String(org_id.to_string()));
         filters.insert("user_id".to_string(), Value::String(user_id.to_string()));
-        filters.insert("status".to_string(), Value::String("active".to_string()));
+        filters.insert(
+            "status".to_string(),
+            Value::String(member_status_to_db(MemberStatus::MsActive).to_string()),
+        );
         self.inner
             .update(philand_table::table::ORGANIZATION_MEMBERS, &data, &filters)
             .await
@@ -784,26 +812,6 @@ impl IdentityRepository {
         self.inner
             .delete(philand_table::table::ORGANIZATION_MEMBERS, &filters)
             .await
-            .map_err(map_storage_error)
-    }
-
-    async fn delete_user_by_id(&self, user_id: &str) -> Result<(), sqlx::Error> {
-        let mut filters = Map::new();
-        filters.insert("id".to_string(), Value::String(user_id.to_string()));
-        self.inner
-            .delete(philand_table::table::USERS, &filters)
-            .await
-            .map(|_| ())
-            .map_err(map_storage_error)
-    }
-
-    async fn delete_organization_by_id(&self, org_id: &str) -> Result<(), sqlx::Error> {
-        let mut filters = Map::new();
-        filters.insert("id".to_string(), Value::String(org_id.to_string()));
-        self.inner
-            .delete(philand_table::table::ORGANIZATIONS, &filters)
-            .await
-            .map(|_| ())
             .map_err(map_storage_error)
     }
 }
@@ -874,10 +882,18 @@ fn datetime_field(row: &Map<String, Value>, key: &str) -> DateTime<Utc> {
 }
 
 fn opt_datetime_field(row: &Map<String, Value>, key: &str) -> Option<DateTime<Utc>> {
-    row.get(key)
-        .and_then(Value::as_str)
-        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .map(|dt| dt.with_timezone(&Utc))
+    row.get(key).and_then(Value::as_str).and_then(|s| {
+        // Try RFC3339 first (e.g. "2023-01-15T10:30:00+00:00").
+        chrono::DateTime::parse_from_rfc3339(s)
+            .map(|dt| dt.with_timezone(&Utc))
+            .ok()
+            // Fall back to MySQL DATETIME format (e.g. "2023-01-15 10:30:00").
+            .or_else(|| {
+                chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                    .ok()
+                    .map(|dt| dt.and_utc())
+            })
+    })
 }
 
 fn fmt_db_time(dt: DateTime<Utc>) -> String {

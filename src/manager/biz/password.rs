@@ -72,15 +72,13 @@ impl IdentityBiz {
 
             // TODO: emit event for Notification service to send email
             tracing::info!(
-                "Password reset token for {}: {} (expires {})",
+                "Password reset requested for {} (expires {})",
                 email,
-                raw_token,
                 expires_at
             );
 
             self.enqueue_notification(super::NotificationEvent::PasswordReset {
                 email: email.to_string(),
-                token: raw_token,
             })
             .await;
         } else {

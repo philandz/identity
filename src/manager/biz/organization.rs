@@ -125,16 +125,16 @@ impl IdentityBiz {
             .map_err(Self::map_internal_error)?;
 
         tracing::info!(
-            "Organization invitation token for {} in org {}: {}",
+            "Organization invitation created for {} in org {} (id={})",
             normalized_email,
             org_id,
-            raw_token
+            invitation_id
         );
 
         self.enqueue_notification(super::NotificationEvent::OrgInvitation {
             email: normalized_email.clone(),
             org_id: org_id.to_string(),
-            token: raw_token.clone(),
+            invitation_id: invitation_id.clone(),
         })
         .await;
 
