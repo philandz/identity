@@ -755,13 +755,11 @@ impl IdentityRepository {
 
         let mut tx = self.pool.begin().await?;
 
-        sqlx::query(&format!(
-            "UPDATE {invitations} SET status = ? WHERE id = ?"
-        ))
-        .bind(invitation_status_to_db(InvitationStatus::IsAccepted))
-        .bind(invitation_id)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query(&format!("UPDATE {invitations} SET status = ? WHERE id = ?"))
+            .bind(invitation_status_to_db(InvitationStatus::IsAccepted))
+            .bind(invitation_id)
+            .execute(&mut *tx)
+            .await?;
 
         // Upsert membership atomically.
         // Relies on the PRIMARY KEY (org_id, user_id) in organization_members.
