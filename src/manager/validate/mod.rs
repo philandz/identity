@@ -102,16 +102,11 @@ pub fn remove_org_member_input(org_id: &str, user_id: &str) -> Result<(), Status
 
 fn email_value(email: &str) -> Result<(), Status> {
     let trimmed = email.trim();
-    if trimmed.is_empty() {
+    if philand_validator::non_empty("email", trimmed).is_err() {
         return Err(Status::invalid_argument("Email must not be empty"));
     }
 
-    let has_at = trimmed.contains('@');
-    let has_domain = trimmed
-        .split('@')
-        .nth(1)
-        .is_some_and(|part| part.contains('.'));
-    if !has_at || !has_domain {
+    if philand_validator::email(trimmed).is_err() {
         return Err(Status::invalid_argument("Email format is invalid"));
     }
 
@@ -137,7 +132,7 @@ fn password_value(password: &str) -> Result<(), Status> {
 
 fn display_name_value(display_name: &str) -> Result<(), Status> {
     let trimmed = display_name.trim();
-    if trimmed.is_empty() {
+    if philand_validator::non_empty("display_name", trimmed).is_err() {
         return Err(Status::invalid_argument("Display name must not be empty"));
     }
 

@@ -125,11 +125,18 @@ impl IdentityBiz {
             .map_err(Self::map_internal_error)?;
 
         tracing::info!(
-            "Organization invitation token for {} in org {}: {}",
+            "Organization invitation created for {} in org {} (id={})",
             normalized_email,
             org_id,
-            raw_token
+            invitation_id
         );
+
+        self.enqueue_notification(super::NotificationEvent::OrgInvitation {
+            email: normalized_email.clone(),
+            org_id: org_id.to_string(),
+            invitation_id: invitation_id.clone(),
+        })
+        .await;
 
         Ok(InviteMemberResponse {
             invitation: Some(OrganizationInvitation {
@@ -292,8 +299,5 @@ impl IdentityBiz {
 }
 
 fn generate_random_token() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    hex::encode(bytes)
+    philand_random::random_string(64)
 }
