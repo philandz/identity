@@ -275,7 +275,7 @@ impl IdentityRepository {
         } else {
             "ASC"
         };
-        let limit = q.page_size.max(1).min(100) as i64;
+        let limit = q.page_size.clamp(1, 100) as i64;
         let offset = ((q.page.max(1) - 1) as i64) * limit;
 
         // Count query
@@ -503,7 +503,7 @@ impl IdentityRepository {
         } else {
             "ASC"
         };
-        let limit = q.page_size.max(1).min(100) as i64;
+        let limit = q.page_size.clamp(1, 100) as i64;
         let offset = ((q.page.max(1) - 1) as i64) * limit;
 
         let count_sql = format!("SELECT COUNT(*) as count FROM {organizations} {where_clause}");

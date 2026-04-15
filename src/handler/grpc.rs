@@ -286,7 +286,7 @@ impl IdentityService for IdentityHandler {
         let token = extract_bearer_token(&request)?;
         let claims = self.biz.verify_jwt(&token).await?;
         let req = request.into_inner();
-        let user_type = req.user_type.map(|v| v as i32);
+        let user_type = req.user_type;
         let resp = self
             .biz
             .create_user(
@@ -307,8 +307,8 @@ impl IdentityService for IdentityHandler {
         let token = extract_bearer_token(&request)?;
         let claims = self.biz.verify_jwt(&token).await?;
         let req = request.into_inner();
-        let user_type = req.user_type.map(|v| v as i32);
-        let status = req.status.map(|v| v as i32);
+        let user_type = req.user_type;
+        let status = req.status;
         let resp = self
             .biz
             .update_user(
@@ -382,7 +382,7 @@ impl IdentityService for IdentityHandler {
         let token = extract_bearer_token(&request)?;
         let claims = self.biz.verify_jwt(&token).await?;
         let req = request.into_inner();
-        let status = req.status.map(|v| v as i32);
+        let status = req.status;
         let resp = self
             .biz
             .update_organization_admin(&claims.sub, &req.org_id, req.name.as_deref(), status)

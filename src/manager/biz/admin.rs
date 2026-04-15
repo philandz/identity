@@ -31,7 +31,7 @@ fn build_list_query(
         sort_by: p.sort_by.clone().filter(|s| !s.is_empty()),
         sort_dir: p.sort_dir.clone().filter(|s| !s.is_empty()),
         page: p.page.unwrap_or(1).max(1),
-        page_size: p.page_size.unwrap_or(20).max(1).min(100),
+        page_size: p.page_size.unwrap_or(20).clamp(1, 100),
     }
 }
 
