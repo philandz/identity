@@ -13,6 +13,10 @@ pub struct DbUser {
     pub email: String,
     pub password_hash: String,
     pub display_name: String,
+    pub avatar: Option<String>,
+    pub bio: Option<String>,
+    pub timezone: String,
+    pub locale: String,
     pub user_type: String,
     pub status: String,
     pub created_at: DateTime<Utc>,
@@ -51,6 +55,13 @@ pub struct DbPasswordResetToken {
     pub expires_at: DateTime<Utc>,
     pub used_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+pub struct DbUserOrganization {
+    pub id: String,
+    pub name: String,
+    pub org_role: String,
 }
 
 #[derive(sqlx::FromRow)]
@@ -213,6 +224,18 @@ impl From<DbUser> for user::User {
             password_hash: db_user.password_hash,
             display_name: db_user.display_name,
             user_type: user_type as i32,
+            avatar: db_user.avatar.unwrap_or_default(),
+            bio: db_user.bio.unwrap_or_default(),
+            timezone: if db_user.timezone.is_empty() {
+                "UTC".to_string()
+            } else {
+                db_user.timezone
+            },
+            locale: if db_user.locale.is_empty() {
+                "en".to_string()
+            } else {
+                db_user.locale
+            },
         }
     }
 }

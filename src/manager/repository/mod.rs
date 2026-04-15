@@ -1,7 +1,7 @@
 use crate::converters::{
     base_status_to_db, invitation_status_from_db, invitation_status_to_db, member_status_from_db,
     member_status_to_db, org_role_from_db, org_role_to_db, user_type_to_db, DbOrganization,
-    DbPasswordResetToken, DbUser,
+    DbPasswordResetToken, DbUser, DbUserOrganization,
 };
 use crate::pb::common::base::BaseStatus;
 use crate::pb::shared::organization::{InvitationStatus, MemberStatus, OrgRole};
@@ -13,6 +13,18 @@ use sqlx::Row;
 pub struct IdentityRepository {
     inner: philand_storage::repo::Repo,
     pool: std::sync::Arc<sqlx::Pool<sqlx::MySql>>,
+}
+
+/// Parameters for paginated list queries.
+#[derive(Debug, Default)]
+pub struct ListQuery {
+    pub search: Option<String>,
+    pub status: Option<String>,
+    pub user_type: Option<String>,
+    pub sort_by: Option<String>,
+    pub sort_dir: Option<String>,
+    pub page: i32,
+    pub page_size: i32,
 }
 
 pub struct OrgSummaryRow {
@@ -75,7 +87,11 @@ impl IdentityRepository {
     }
 
     async fn ensure_tables(&self) -> Result<(), philand_storage::StorageError> {
-        sqlx::migrate!("./migrations")
+        let mut migrator = sqlx::migrate::Migrator::new(std::path::Path::new("./migrations"))
+            .await
+            .map_err(|e| philand_storage::StorageError::Sqlx(e.into()))?;
+        migrator.set_ignore_missing(true);
+        migrator
             .run(&*self.pool)
             .await
             .map_err(|e| philand_storage::StorageError::Sqlx(e.into()))
@@ -211,6 +227,135 @@ impl IdentityRepository {
         Ok(row.map(map_to_db_user))
     }
 
+    pub async fn list_users(&self) -> Result<Vec<DbUser>, sqlx::Error> {
+        let users = table_name(philand_table::table::USERS);
+        sqlx::query_as::<_, DbUser>(&format!("SELECT * FROM {users} ORDER BY created_at DESC"))
+            .fetch_all(&*self.pool)
+            .await
+    }
+
+    /// Paginated, filtered, sorted user list. Returns (rows, total_count).
+    pub async fn list_users_paged(&self, q: &ListQuery) -> Result<(Vec<DbUser>, i64), sqlx::Error> {
+        let users = table_name(philand_table::table::USERS);
+
+        // Build WHERE clauses
+        let mut conditions: Vec<String> = Vec::new();
+        let mut binds: Vec<String> = Vec::new();
+
+        if let Some(ref search) = q.search {
+            conditions.push("(display_name LIKE ? OR email LIKE ?)".to_string());
+            let pattern = format!("%{search}%");
+            binds.push(pattern.clone());
+            binds.push(pattern);
+        }
+        if let Some(ref status) = q.status {
+            conditions.push("status = ?".to_string());
+            binds.push(status.clone());
+        }
+        if let Some(ref user_type) = q.user_type {
+            conditions.push("user_type = ?".to_string());
+            binds.push(user_type.clone());
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+
+        let sort_col = match q.sort_by.as_deref() {
+            Some("email") => "email",
+            Some("display_name") => "display_name",
+            Some("user_type") => "user_type",
+            Some("status") => "status",
+            _ => "created_at",
+        };
+        let sort_dir = if q.sort_dir.as_deref() == Some("desc") {
+            "DESC"
+        } else {
+            "ASC"
+        };
+        let limit = q.page_size.max(1).min(100) as i64;
+        let offset = ((q.page.max(1) - 1) as i64) * limit;
+
+        // Count query
+        let count_sql = format!("SELECT COUNT(*) as count FROM {users} {where_clause}");
+        let mut count_q = sqlx::query(&count_sql);
+        for b in &binds {
+            count_q = count_q.bind(b);
+        }
+        let total: i64 = count_q.fetch_one(&*self.pool).await?.try_get("count")?;
+
+        // Data query
+        let data_sql = format!(
+            "SELECT * FROM {users} {where_clause} ORDER BY {sort_col} {sort_dir} LIMIT ? OFFSET ?"
+        );
+        let mut data_q = sqlx::query_as::<_, DbUser>(&data_sql);
+        for b in &binds {
+            data_q = data_q.bind(b);
+        }
+        data_q = data_q.bind(limit).bind(offset);
+        let rows = data_q.fetch_all(&*self.pool).await?;
+
+        Ok((rows, total))
+    }
+
+    pub async fn count_active_super_admin_users(&self) -> Result<i64, sqlx::Error> {
+        let users = table_name(philand_table::table::USERS);
+        let row = sqlx::query(&format!(
+            "SELECT COUNT(*) as count FROM {users} WHERE user_type = ? AND status = ?"
+        ))
+        .bind(user_type_to_db(UserType::UtSuperAdmin))
+        .bind(base_status_to_db(BaseStatus::BsActive))
+        .fetch_one(&*self.pool)
+        .await?;
+
+        row.try_get("count")
+    }
+
+    pub async fn update_user_admin(
+        &self,
+        user_id: &str,
+        display_name: Option<&str>,
+        user_type: Option<UserType>,
+        status: Option<BaseStatus>,
+    ) -> Result<(), sqlx::Error> {
+        let mut data = Map::new();
+
+        if let Some(v) = display_name {
+            data.insert(
+                "display_name".to_string(),
+                Value::String(v.trim().to_string()),
+            );
+        }
+
+        if let Some(v) = user_type {
+            data.insert(
+                "user_type".to_string(),
+                Value::String(user_type_to_db(v).to_string()),
+            );
+        }
+
+        if let Some(v) = status {
+            data.insert(
+                "status".to_string(),
+                Value::String(base_status_to_db(v).to_string()),
+            );
+        }
+
+        if data.is_empty() {
+            return Ok(());
+        }
+
+        let mut filters = Map::new();
+        filters.insert("id".to_string(), Value::String(user_id.to_string()));
+        self.inner
+            .update(philand_table::table::USERS, &data, &filters)
+            .await
+            .map(|_| ())
+            .map_err(map_storage_error)
+    }
+
     pub async fn insert_organization(
         &self,
         id: &str,
@@ -297,13 +442,13 @@ impl IdentityRepository {
     pub async fn find_user_organizations(
         &self,
         user_id: &str,
-    ) -> Result<Vec<DbOrganization>, sqlx::Error> {
+    ) -> Result<Vec<DbUserOrganization>, sqlx::Error> {
         let org_members = table_name(philand_table::table::ORGANIZATION_MEMBERS);
         let organizations = table_name(philand_table::table::ORGANIZATIONS);
         let active_status = member_status_to_db(MemberStatus::MsActive);
 
-        sqlx::query_as::<_, DbOrganization>(&format!(
-            "SELECT o.* \
+        sqlx::query_as::<_, DbUserOrganization>(&format!(
+            "SELECT o.id, o.name, om.org_role \
              FROM {organizations} o \
              INNER JOIN {org_members} om ON o.id = om.org_id \
              WHERE om.user_id = ? AND om.status = ?"
@@ -312,6 +457,119 @@ impl IdentityRepository {
         .bind(active_status)
         .fetch_all(&*self.pool)
         .await
+    }
+
+    pub async fn list_organizations(&self) -> Result<Vec<DbOrganization>, sqlx::Error> {
+        let organizations = table_name(philand_table::table::ORGANIZATIONS);
+        sqlx::query_as::<_, DbOrganization>(&format!(
+            "SELECT * FROM {organizations} ORDER BY created_at DESC"
+        ))
+        .fetch_all(&*self.pool)
+        .await
+    }
+
+    /// Paginated, filtered, sorted organization list. Returns (rows, total_count).
+    pub async fn list_organizations_paged(
+        &self,
+        q: &ListQuery,
+    ) -> Result<(Vec<DbOrganization>, i64), sqlx::Error> {
+        let organizations = table_name(philand_table::table::ORGANIZATIONS);
+
+        let mut conditions: Vec<String> = Vec::new();
+        let mut binds: Vec<String> = Vec::new();
+
+        if let Some(ref search) = q.search {
+            conditions.push("name LIKE ?".to_string());
+            binds.push(format!("%{search}%"));
+        }
+        if let Some(ref status) = q.status {
+            conditions.push("status = ?".to_string());
+            binds.push(status.clone());
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+
+        let sort_col = match q.sort_by.as_deref() {
+            Some("name") => "name",
+            Some("status") => "status",
+            _ => "created_at",
+        };
+        let sort_dir = if q.sort_dir.as_deref() == Some("desc") {
+            "DESC"
+        } else {
+            "ASC"
+        };
+        let limit = q.page_size.max(1).min(100) as i64;
+        let offset = ((q.page.max(1) - 1) as i64) * limit;
+
+        let count_sql = format!("SELECT COUNT(*) as count FROM {organizations} {where_clause}");
+        let mut count_q = sqlx::query(&count_sql);
+        for b in &binds {
+            count_q = count_q.bind(b);
+        }
+        let total: i64 = count_q.fetch_one(&*self.pool).await?.try_get("count")?;
+
+        let data_sql = format!(
+            "SELECT * FROM {organizations} {where_clause} ORDER BY {sort_col} {sort_dir} LIMIT ? OFFSET ?"
+        );
+        let mut data_q = sqlx::query_as::<_, DbOrganization>(&data_sql);
+        for b in &binds {
+            data_q = data_q.bind(b);
+        }
+        data_q = data_q.bind(limit).bind(offset);
+        let rows = data_q.fetch_all(&*self.pool).await?;
+
+        Ok((rows, total))
+    }
+
+    pub async fn find_organization_by_id(
+        &self,
+        org_id: &str,
+    ) -> Result<Option<DbOrganization>, sqlx::Error> {
+        let mut filters = Map::new();
+        filters.insert("id".to_string(), Value::String(org_id.to_string()));
+        let row = self
+            .inner
+            .get(philand_table::table::ORGANIZATIONS, &filters)
+            .await
+            .map_err(map_storage_error)?;
+        Ok(row.map(map_to_db_organization))
+    }
+
+    pub async fn update_organization_admin(
+        &self,
+        org_id: &str,
+        name: Option<&str>,
+        status: Option<BaseStatus>,
+    ) -> Result<(), sqlx::Error> {
+        let mut data = Map::new();
+
+        if let Some(v) = name {
+            data.insert("name".to_string(), Value::String(v.trim().to_string()));
+        }
+
+        if let Some(v) = status {
+            data.insert(
+                "status".to_string(),
+                Value::String(base_status_to_db(v).to_string()),
+            );
+        }
+
+        if data.is_empty() {
+            return Ok(());
+        }
+
+        let mut filters = Map::new();
+        filters.insert("id".to_string(), Value::String(org_id.to_string()));
+        self.inner
+            .update(philand_table::table::ORGANIZATIONS, &data, &filters)
+            .await
+            .map(|_| ())
+            .map_err(map_storage_error)
     }
 
     pub async fn insert_revoked_token(
@@ -433,6 +691,61 @@ impl IdentityRepository {
             "password_hash".to_string(),
             Value::String(new_password_hash.to_string()),
         );
+        let mut filters = Map::new();
+        filters.insert("id".to_string(), Value::String(user_id.to_string()));
+        self.inner
+            .update(philand_table::table::USERS, &data, &filters)
+            .await
+            .map(|_| ())
+            .map_err(map_storage_error)
+    }
+
+    pub async fn update_user_profile(
+        &self,
+        user_id: &str,
+        display_name: Option<&str>,
+        avatar: Option<&str>,
+        bio: Option<&str>,
+        timezone: Option<&str>,
+        locale: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let mut data = Map::new();
+
+        if let Some(v) = display_name {
+            data.insert(
+                "display_name".to_string(),
+                Value::String(v.trim().to_string()),
+            );
+        }
+
+        if let Some(v) = avatar {
+            if v.trim().is_empty() {
+                data.insert("avatar".to_string(), Value::Null);
+            } else {
+                data.insert("avatar".to_string(), Value::String(v.trim().to_string()));
+            }
+        }
+
+        if let Some(v) = bio {
+            if v.trim().is_empty() {
+                data.insert("bio".to_string(), Value::Null);
+            } else {
+                data.insert("bio".to_string(), Value::String(v.trim().to_string()));
+            }
+        }
+
+        if let Some(v) = timezone {
+            data.insert("timezone".to_string(), Value::String(v.trim().to_string()));
+        }
+
+        if let Some(v) = locale {
+            data.insert("locale".to_string(), Value::String(v.trim().to_string()));
+        }
+
+        if data.is_empty() {
+            return Ok(());
+        }
+
         let mut filters = Map::new();
         filters.insert("id".to_string(), Value::String(user_id.to_string()));
         self.inner
@@ -659,6 +972,149 @@ impl IdentityRepository {
             .await
             .map_err(map_storage_error)
     }
+
+    pub async fn transfer_org_ownership(
+        &self,
+        org_id: &str,
+        current_owner_id: &str,
+        new_owner_id: &str,
+    ) -> Result<(), sqlx::Error> {
+        let members = table_name(philand_table::table::ORGANIZATION_MEMBERS);
+        let organizations = table_name(philand_table::table::ORGANIZATIONS);
+
+        let mut tx = self.pool.begin().await?;
+
+        // Demote current owner to admin.
+        sqlx::query(&format!(
+            "UPDATE {members} SET org_role = ? WHERE org_id = ? AND user_id = ?"
+        ))
+        .bind(org_role_to_db(OrgRole::OrAdmin))
+        .bind(org_id)
+        .bind(current_owner_id)
+        .execute(&mut *tx)
+        .await?;
+
+        // Promote new owner.
+        sqlx::query(&format!(
+            "UPDATE {members} SET org_role = ? WHERE org_id = ? AND user_id = ?"
+        ))
+        .bind(org_role_to_db(OrgRole::OrOwner))
+        .bind(org_id)
+        .bind(new_owner_id)
+        .execute(&mut *tx)
+        .await?;
+
+        // Update the canonical owner reference on the org row.
+        sqlx::query(&format!(
+            "UPDATE {organizations} SET owner_user_id = ? WHERE id = ?"
+        ))
+        .bind(new_owner_id)
+        .bind(org_id)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn rename_organization(
+        &self,
+        org_id: &str,
+        new_name: &str,
+    ) -> Result<u64, sqlx::Error> {
+        let mut data = Map::new();
+        data.insert(
+            "name".to_string(),
+            Value::String(new_name.trim().to_string()),
+        );
+        let mut filters = Map::new();
+        filters.insert("id".to_string(), Value::String(org_id.to_string()));
+        self.inner
+            .update(philand_table::table::ORGANIZATIONS, &data, &filters)
+            .await
+            .map_err(map_storage_error)
+    }
+
+    pub async fn find_pending_invitations_by_org(
+        &self,
+        org_id: &str,
+    ) -> Result<Vec<OrganizationInvitationRow>, sqlx::Error> {
+        let invitations = table_name(philand_table::table::ORGANIZATION_INVITATIONS);
+        let pending = invitation_status_to_db(InvitationStatus::IsPending);
+
+        let rows = sqlx::query(&format!(
+            "SELECT id, org_id, inviter_id, invitee_email, org_role, status, expires_at, created_at \
+             FROM {invitations} \
+             WHERE org_id = ? AND status = ? AND expires_at > NOW() \
+             ORDER BY created_at DESC"
+        ))
+        .bind(org_id)
+        .bind(pending)
+        .fetch_all(&*self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| -> Result<OrganizationInvitationRow, sqlx::Error> {
+                Ok(OrganizationInvitationRow {
+                    id: row.try_get("id")?,
+                    org_id: row.try_get("org_id")?,
+                    inviter_id: row.try_get("inviter_id")?,
+                    invitee_email: row.try_get("invitee_email")?,
+                    org_role: org_role_from_db(&row.try_get::<String, _>("org_role")?),
+                    status: invitation_status_from_db(&row.try_get::<String, _>("status")?),
+                    expires_at: row
+                        .try_get::<DateTime<Utc>, _>("expires_at")
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0),
+                    created_at: row
+                        .try_get::<DateTime<Utc>, _>("created_at")
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+    }
+
+    pub async fn revoke_invitation(
+        &self,
+        org_id: &str,
+        invitation_id: &str,
+    ) -> Result<u64, sqlx::Error> {
+        let invitations = table_name(philand_table::table::ORGANIZATION_INVITATIONS);
+        let result = sqlx::query(&format!(
+            "UPDATE {invitations} SET status = ? WHERE id = ? AND org_id = ? AND status = ?"
+        ))
+        .bind(invitation_status_to_db(InvitationStatus::IsRevoked))
+        .bind(invitation_id)
+        .bind(org_id)
+        .bind(invitation_status_to_db(InvitationStatus::IsPending))
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Hard-delete a user row (admin only — caller must have already checked guards).
+    pub async fn delete_user(&self, user_id: &str) -> Result<(), sqlx::Error> {
+        let mut filters = Map::new();
+        filters.insert("id".to_string(), Value::String(user_id.to_string()));
+        self.inner
+            .delete(philand_table::table::USERS, &filters)
+            .await
+            .map(|_| ())
+            .map_err(map_storage_error)
+    }
+
+    /// Hard-delete an organization row (admin only — caller must have already checked guards).
+    pub async fn delete_organization(&self, org_id: &str) -> Result<(), sqlx::Error> {
+        let mut filters = Map::new();
+        filters.insert("id".to_string(), Value::String(org_id.to_string()));
+        self.inner
+            .delete(philand_table::table::ORGANIZATIONS, &filters)
+            .await
+            .map(|_| ())
+            .map_err(map_storage_error)
+    }
 }
 
 fn map_storage_error(err: philand_storage::StorageError) -> sqlx::Error {
@@ -676,6 +1132,10 @@ fn map_to_db_user(row: Map<String, Value>) -> DbUser {
         email: string_field(&row, "email"),
         password_hash: string_field(&row, "password_hash"),
         display_name: string_field(&row, "display_name"),
+        avatar: opt_string_field(&row, "avatar"),
+        bio: opt_string_field(&row, "bio"),
+        timezone: string_field(&row, "timezone"),
+        locale: string_field(&row, "locale"),
         user_type: string_field(&row, "user_type"),
         status: string_field(&row, "status"),
         created_at: datetime_field(&row, "created_at"),
@@ -694,6 +1154,20 @@ fn map_to_db_password_reset(row: Map<String, Value>) -> DbPasswordResetToken {
         expires_at: datetime_field(&row, "expires_at"),
         used_at: opt_datetime_field(&row, "used_at"),
         created_at: datetime_field(&row, "created_at"),
+    }
+}
+
+fn map_to_db_organization(row: Map<String, Value>) -> DbOrganization {
+    DbOrganization {
+        id: string_field(&row, "id"),
+        name: string_field(&row, "name"),
+        owner_user_id: string_field(&row, "owner_user_id"),
+        status: string_field(&row, "status"),
+        created_at: datetime_field(&row, "created_at"),
+        updated_at: datetime_field(&row, "updated_at"),
+        deleted_at: opt_datetime_field(&row, "deleted_at"),
+        created_by: opt_string_field(&row, "created_by"),
+        updated_by: opt_string_field(&row, "updated_by"),
     }
 }
 

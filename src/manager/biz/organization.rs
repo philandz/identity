@@ -7,7 +7,7 @@ use crate::manager::validate;
 use crate::pb::service::identity::{
     AcceptInvitationResponse, ChangeOrgMemberRoleResponse, InviteMemberResponse,
     ListOrgMembersResponse, ListOrganizationsResponse, OrgMemberView, OrganizationInvitation,
-    RemoveOrgMemberResponse,
+    OrganizationSummary, RemoveOrgMemberResponse,
 };
 use crate::pb::shared::organization::{InvitationStatus, OrgRole};
 
@@ -19,13 +19,18 @@ impl IdentityBiz {
         &self,
         user_id: &str,
     ) -> Result<ListOrganizationsResponse, Status> {
+        use crate::converters::org_role_from_db;
         let organizations = self
             .repo
             .find_user_organizations(user_id)
             .await
             .map_err(Self::map_internal_error)?
             .into_iter()
-            .map(Into::into)
+            .map(|o| OrganizationSummary {
+                id: o.id,
+                name: o.name,
+                role: org_role_from_db(&o.org_role) as i32,
+            })
             .collect();
 
         Ok(ListOrganizationsResponse { organizations })
@@ -241,6 +246,140 @@ impl IdentityBiz {
         }
 
         Ok(ChangeOrgMemberRoleResponse {})
+    }
+
+    pub async fn transfer_org_ownership(
+        &self,
+        caller_user_id: &str,
+        org_id: &str,
+        new_owner_id: &str,
+    ) -> Result<(), Status> {
+        if caller_user_id == new_owner_id {
+            return Err(Status::invalid_argument(
+                "You are already the owner of this organization",
+            ));
+        }
+
+        let caller_role = self
+            .repo
+            .find_org_member_role(org_id, caller_user_id)
+            .await
+            .map_err(Self::map_internal_error)?
+            .ok_or_else(|| Status::permission_denied("Caller is not an active org member"))?;
+        if caller_role != OrgRole::OrOwner {
+            return Err(Status::permission_denied(
+                "Only the current owner can transfer ownership",
+            ));
+        }
+
+        let target_role = self
+            .repo
+            .find_org_member_role(org_id, new_owner_id)
+            .await
+            .map_err(Self::map_internal_error)?
+            .ok_or_else(|| Status::not_found("Target member not found in this organization"))?;
+        if target_role == OrgRole::OrOwner {
+            return Err(Status::invalid_argument("Target is already the owner"));
+        }
+
+        self.repo
+            .transfer_org_ownership(org_id, caller_user_id, new_owner_id)
+            .await
+            .map_err(Self::map_internal_error)?;
+
+        Ok(())
+    }
+
+    pub async fn rename_organization(
+        &self,
+        caller_user_id: &str,
+        org_id: &str,
+        new_name: &str,
+    ) -> Result<(), Status> {
+        let trimmed = new_name.trim();
+        if trimmed.is_empty() || trimmed.len() > 100 {
+            return Err(Status::invalid_argument(
+                "Organization name must be between 1 and 100 characters",
+            ));
+        }
+
+        let caller_role = self
+            .repo
+            .find_org_member_role(org_id, caller_user_id)
+            .await
+            .map_err(Self::map_internal_error)?
+            .ok_or_else(|| Status::permission_denied("Caller is not an active org member"))?;
+        if caller_role != OrgRole::OrOwner {
+            return Err(Status::permission_denied(
+                "Only owner can rename the organization",
+            ));
+        }
+
+        let updated = self
+            .repo
+            .rename_organization(org_id, trimmed)
+            .await
+            .map_err(Self::map_internal_error)?;
+        if updated == 0 {
+            return Err(Status::not_found("Organization not found"));
+        }
+
+        Ok(())
+    }
+
+    pub async fn list_org_invitations(
+        &self,
+        caller_user_id: &str,
+        org_id: &str,
+    ) -> Result<Vec<crate::manager::repository::OrganizationInvitationRow>, Status> {
+        let caller_role = self
+            .repo
+            .find_org_member_role(org_id, caller_user_id)
+            .await
+            .map_err(Self::map_internal_error)?
+            .ok_or_else(|| Status::permission_denied("Caller is not an active org member"))?;
+        if !matches!(caller_role, OrgRole::OrOwner | OrgRole::OrAdmin) {
+            return Err(Status::permission_denied(
+                "Only owner/admin can view invitations",
+            ));
+        }
+
+        self.repo
+            .find_pending_invitations_by_org(org_id)
+            .await
+            .map_err(Self::map_internal_error)
+    }
+
+    pub async fn revoke_invitation(
+        &self,
+        caller_user_id: &str,
+        org_id: &str,
+        invitation_id: &str,
+    ) -> Result<(), Status> {
+        let caller_role = self
+            .repo
+            .find_org_member_role(org_id, caller_user_id)
+            .await
+            .map_err(Self::map_internal_error)?
+            .ok_or_else(|| Status::permission_denied("Caller is not an active org member"))?;
+        if !matches!(caller_role, OrgRole::OrOwner | OrgRole::OrAdmin) {
+            return Err(Status::permission_denied(
+                "Only owner/admin can revoke invitations",
+            ));
+        }
+
+        let revoked = self
+            .repo
+            .revoke_invitation(org_id, invitation_id)
+            .await
+            .map_err(Self::map_internal_error)?;
+        if revoked == 0 {
+            return Err(Status::not_found(
+                "Invitation not found or already processed",
+            ));
+        }
+
+        Ok(())
     }
 
     pub async fn remove_org_member(
