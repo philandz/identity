@@ -1,4 +1,6 @@
+mod admin;
 mod auth;
+pub mod authz;
 mod organization;
 mod password;
 mod profile;
@@ -51,5 +53,39 @@ impl IdentityBiz {
                 tracing::warn!("notification queue enqueue failed: {err}");
             }
         }
+    }
+
+    /// Central authorization gate. Call this at the top of every biz method that
+    /// requires elevated access. Returns `Status::permission_denied` (→ HTTP 403)
+    /// if the caller does not hold the required permission.
+    pub async fn require_permission(
+        &self,
+        caller_user_id: &str,
+        permission: authz::Permission,
+    ) -> Result<(), Status> {
+        use crate::converters::{base_status_from_db, user_type_from_db};
+        use crate::pb::common::base::BaseStatus;
+        use crate::pb::shared::user::UserType;
+
+        let caller = self
+            .repo
+            .find_user_by_id(caller_user_id)
+            .await
+            .map_err(Self::map_internal_error)?
+            .ok_or_else(|| Status::unauthenticated("User not found"))?;
+
+        if base_status_from_db(&caller.status) != BaseStatus::BsActive {
+            return Err(Status::permission_denied("Account is disabled"));
+        }
+
+        match permission {
+            authz::Permission::ManageAnyUser | authz::Permission::ManageAnyOrganization => {
+                if user_type_from_db(&caller.user_type) != UserType::UtSuperAdmin {
+                    return Err(Status::permission_denied("Super admin permission required"));
+                }
+            }
+        }
+
+        Ok(())
     }
 }
