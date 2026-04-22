@@ -1,0 +1,50 @@
+[workspace]
+members = [
+    "configs",
+    "logging",
+    "crypto",
+    "oauth2",
+    "storage",
+    "http",
+    "validator",
+    "common",
+    "concurrency",
+    "ratelimit",
+    "random",
+    "time",
+    "env",
+    "error",
+    "marshaler",
+    "copier",
+    "notify",
+    "queue",
+    "socket",
+    "ssh",
+    "application",
+    "table",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+url = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+sha2 = "0.10"
+hex = "0.4"
+bcrypt = "0.15"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+sqlx = { version = "0.7", features = ["mysql", "runtime-tokio-rustls", "chrono", "migrate"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+rusty-s3 = "0.7"
+rand = "0.8"
+base64 = "0.22"
+regex = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
