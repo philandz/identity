@@ -87,7 +87,11 @@ impl IdentityRepository {
     }
 
     async fn ensure_tables(&self) -> Result<(), philand_storage::StorageError> {
-        sqlx::migrate!("./migrations")
+        let mut migrator = sqlx::migrate::Migrator::new(std::path::Path::new("./migrations"))
+            .await
+            .map_err(|e| philand_storage::StorageError::Sqlx(e.into()))?;
+        migrator.set_ignore_missing(true);
+        migrator
             .run(&*self.pool)
             .await
             .map_err(|e| philand_storage::StorageError::Sqlx(e.into()))
