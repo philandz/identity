@@ -411,7 +411,9 @@ impl IdentityService for IdentityHandler {
         request: Request<GetOrgRoleRequest>,
     ) -> Result<Response<GetOrgRoleResponse>, Status> {
         let req = request.into_inner();
-        let role = self.biz.get_org_role(&req.user_id, &req.org_id).await?;
-        Ok(Response::new(GetOrgRoleResponse { role: role as i32 }))
+        let org_role = self.biz.get_org_role(&req.user_id, &req.org_id).await?;
+        Ok(Response::new(GetOrgRoleResponse {
+            role: org_role as i32,
+        }))
     }
 }
