@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package common.base;
+
+option go_package = "github.com/philandz/libs/protobuf/common";
+
+enum BaseStatus {
+    BS_NONE = 0;
+    BS_ACTIVE = 1;
+    BS_INACTIVE = 2;
+    BS_PENDING = 3;
+    BS_DELETED = 4;
+    BS_ARCHIVED = 5;
+    BS_BLOCKED = 6;
+    BS_UNKNOWN = 7;
+    BS_DISABLED = 8;
+    BS_INVITED = 9;
+}
+
+message Base {
+  string id = 1;
+  int64 created_at = 2;
+  int64 updated_at = 3;
+  int64 deleted_at = 4;
+  string created_by = 5;
+  string updated_by = 6;
+  string owner_id = 7;
+  BaseStatus status = 8;
+}

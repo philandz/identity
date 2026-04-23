@@ -440,3 +440,15 @@ impl IdentityBiz {
 fn generate_random_token() -> String {
     philand_random::random_string(64)
 }
+
+impl super::IdentityBiz {
+    /// Internal RPC — called by Budget service to resolve org membership during CheckRole fallback.
+    pub async fn get_org_role(&self, user_id: &str, org_id: &str) -> Result<OrgRole, Status> {
+        let role = self
+            .repo
+            .find_org_member_role(org_id, user_id)
+            .await
+            .map_err(Self::map_internal_error)?;
+        Ok(role.unwrap_or(OrgRole::OrNone))
+    }
+}
