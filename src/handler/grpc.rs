@@ -21,6 +21,8 @@ use crate::pb::service::identity::{
     DeleteUserResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
+    GetOrgRoleRequest,
+    GetOrgRoleResponse,
     GetOrganizationAdminRequest,
     GetOrganizationAdminResponse,
     GetProfileRequest,
@@ -56,8 +58,6 @@ use crate::pb::service::identity::{
     UpdateProfileResponse,
     UpdateUserRequest,
     UpdateUserResponse,
-    GetOrgRoleRequest,
-    GetOrgRoleResponse,
 };
 
 use super::metadata::extract_bearer_token;
