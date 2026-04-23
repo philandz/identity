@@ -1,0 +1,14 @@
+[package]
+name = "notify"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+httpmock = "0.7"
