@@ -21,8 +21,6 @@ use crate::pb::service::identity::{
     DeleteUserResponse,
     ForgotPasswordRequest,
     ForgotPasswordResponse,
-    GetOrgRoleRequest,
-    GetOrgRoleResponse,
     GetOrganizationAdminRequest,
     GetOrganizationAdminResponse,
     GetProfileRequest,
@@ -404,13 +402,5 @@ impl IdentityService for IdentityHandler {
             .delete_organization_admin(&claims.sub, &req.org_id)
             .await?;
         Ok(Response::new(resp))
-    }
-    async fn get_org_role(
-        &self,
-        request: Request<GetOrgRoleRequest>,
-    ) -> Result<Response<GetOrgRoleResponse>, Status> {
-        let req = request.into_inner();
-        let role = self.biz.get_org_role(&req.user_id, &req.org_id).await?;
-        Ok(Response::new(GetOrgRoleResponse { role: role as i32 }))
     }
 }
