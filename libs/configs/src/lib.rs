@@ -41,6 +41,7 @@ pub struct IdentityServiceConfig {
     pub service_name: String,
     pub super_admin_email: String,
     pub super_admin_password: String,
+    pub google_client_id: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
