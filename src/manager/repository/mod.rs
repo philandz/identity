@@ -1120,7 +1120,10 @@ impl IdentityRepository {
     // Google OAuth
     // -----------------------------------------------------------------------
 
-    pub async fn find_user_by_google_id(&self, google_id: &str) -> Result<Option<DbUser>, sqlx::Error> {
+    pub async fn find_user_by_google_id(
+        &self,
+        google_id: &str,
+    ) -> Result<Option<DbUser>, sqlx::Error> {
         let users = table_name(philand_table::table::USERS);
         let row = sqlx::query_as::<_, DbUser>(&format!(
             "SELECT * FROM {users} WHERE google_id = ? LIMIT 1"
@@ -1204,7 +1207,9 @@ impl IdentityRepository {
         .bind(org_id)
         .bind(org_name)
         .bind(user_id)
-        .bind(base_status_to_db(crate::pb::common::base::BaseStatus::BsActive))
+        .bind(base_status_to_db(
+            crate::pb::common::base::BaseStatus::BsActive,
+        ))
         .execute(&mut *tx)
         .await?;
 

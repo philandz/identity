@@ -4,12 +4,14 @@ use tonic::Status;
 
 #[derive(Debug, Deserialize)]
 struct GoogleTokenInfo {
-    sub: String,           // Google user ID
+    sub: String, // Google user ID
     email: String,
+    // Field returned by Google tokeninfo; kept optional for completeness.
+    #[allow(dead_code)]
     email_verified: Option<String>,
     name: Option<String>,
     picture: Option<String>,
-    aud: String,           // audience (client ID)
+    aud: String, // audience (client ID)
 }
 
 use crate::converters::user_type_from_db;
@@ -126,6 +128,11 @@ impl IdentityBiz {
             .map_err(Self::map_internal_error)?
             .ok_or_else(|| Status::unauthenticated("Invalid credentials"))?;
 
+        if db_user.password_hash.is_empty() {
+            // Account was created via Google SSO — no password set
+            return Err(Status::unauthenticated("Invalid credentials"));
+        }
+
         let valid = philand_crypto::verify_password(password, &db_user.password_hash)
             .map_err(Self::map_internal_error)?;
         if !valid {
@@ -194,13 +201,15 @@ impl IdentityBiz {
         let google_info = self.verify_google_id_token(id_token).await?;
 
         // Try to find existing user by google_id
-        let db_user = if let Some(user) = self.repo
+        let db_user = if let Some(user) = self
+            .repo
             .find_user_by_google_id(&google_info.sub)
             .await
             .map_err(Self::map_internal_error)?
         {
             user
-        } else if let Some(mut user) = self.repo
+        } else if let Some(mut user) = self
+            .repo
             .find_user_by_email(&google_info.email)
             .await
             .map_err(Self::map_internal_error)?
@@ -211,7 +220,8 @@ impl IdentityBiz {
                 .await
                 .map_err(Self::map_internal_error)?;
             // Refresh user row
-            user = self.repo
+            user = self
+                .repo
                 .find_user_by_id(&user.id)
                 .await
                 .map_err(Self::map_internal_error)?
@@ -221,8 +231,14 @@ impl IdentityBiz {
             // Create new user with default org
             let user_id = uuid::Uuid::new_v4().to_string();
             let org_id = uuid::Uuid::new_v4().to_string();
-            let display_name = google_info.name.clone()
-                .unwrap_or_else(|| google_info.email.split('@').next().unwrap_or("User").to_string());
+            let display_name = google_info.name.clone().unwrap_or_else(|| {
+                google_info
+                    .email
+                    .split('@')
+                    .next()
+                    .unwrap_or("User")
+                    .to_string()
+            });
             let org_name = format!("{}'s Organization", display_name.trim());
 
             use crate::pb::common::base::BaseStatus;
@@ -247,7 +263,8 @@ impl IdentityBiz {
                 .map_err(Self::map_internal_error)?
         };
 
-        let org_rows = self.repo
+        let org_rows = self
+            .repo
             .find_user_org_summaries(&db_user.id)
             .await
             .map_err(Self::map_internal_error)?;
@@ -294,9 +311,7 @@ impl IdentityBiz {
             .map_err(|e| Status::internal(format!("Failed to parse Google tokeninfo: {e}")))?;
 
         // Verify the token was issued for our client
-        if !self.config.google_client_id.is_empty()
-            && info.aud != self.config.google_client_id
-        {
+        if !self.config.google_client_id.is_empty() && info.aud != self.config.google_client_id {
             return Err(Status::unauthenticated("Google token audience mismatch"));
         }
 

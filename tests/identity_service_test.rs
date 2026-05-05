@@ -34,7 +34,11 @@ async fn setup() -> (IdentityServiceClient<tonic::transport::Channel>, MySqlPool
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for integration tests");
     let pool = MySqlPool::connect(&database_url).await.unwrap();
 
-    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    // Local dev DBs may have extra migration versions applied from other branches.
+    // Allow that here so integration tests can still run.
+    let mut migrator = sqlx::migrate!("./migrations");
+    migrator.set_ignore_missing(true);
+    migrator.run(&pool).await.unwrap();
 
     // Clean tables
     sqlx::query("DELETE FROM organization_invitations")
