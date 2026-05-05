@@ -1115,6 +1115,126 @@ impl IdentityRepository {
             .map(|_| ())
             .map_err(map_storage_error)
     }
+
+    // -----------------------------------------------------------------------
+    // Google OAuth
+    // -----------------------------------------------------------------------
+
+    pub async fn find_user_by_google_id(&self, google_id: &str) -> Result<Option<DbUser>, sqlx::Error> {
+        let users = table_name(philand_table::table::USERS);
+        let row = sqlx::query_as::<_, DbUser>(&format!(
+            "SELECT * FROM {users} WHERE google_id = ? LIMIT 1"
+        ))
+        .bind(google_id)
+        .fetch_optional(&*self.pool)
+        .await?;
+        Ok(row)
+    }
+
+    pub async fn link_google_to_user(
+        &self,
+        user_id: &str,
+        google_id: &str,
+        google_email: &str,
+    ) -> Result<(), sqlx::Error> {
+        let users = table_name(philand_table::table::USERS);
+        sqlx::query(&format!(
+            "UPDATE {users} SET google_id = ?, google_email = ? WHERE id = ?"
+        ))
+        .bind(google_id)
+        .bind(google_email)
+        .bind(user_id)
+        .execute(&*self.pool)
+        .await?;
+
+        // Also upsert into oauth providers table
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = philand_time::now_unix();
+        sqlx::query(
+            "INSERT INTO user_oauth_providers (id, user_id, provider, provider_id, email, created_at)
+             VALUES (?, ?, 'google', ?, ?, ?)
+             ON DUPLICATE KEY UPDATE email = VALUES(email)"
+        )
+        .bind(&id).bind(user_id).bind(google_id).bind(google_email).bind(now)
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_google_user_with_default_organization(
+        &self,
+        user_id: &str,
+        email: &str,
+        display_name: &str,
+        avatar_url: Option<&str>,
+        google_id: &str,
+        user_type: crate::pb::shared::user::UserType,
+        user_status: crate::pb::common::base::BaseStatus,
+        org_id: &str,
+        org_name: &str,
+        org_role: crate::pb::shared::organization::OrgRole,
+        membership_status: crate::pb::shared::organization::MemberStatus,
+    ) -> Result<DbUser, sqlx::Error> {
+        let users = table_name(philand_table::table::USERS);
+        let organizations = table_name(philand_table::table::ORGANIZATIONS);
+        let organization_members = table_name(philand_table::table::ORGANIZATION_MEMBERS);
+
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(&format!(
+            "INSERT INTO {users} (id, email, password_hash, display_name, avatar, google_id, google_email, user_type, status)
+             VALUES (?, ?, '', ?, ?, ?, ?, ?, ?)"
+        ))
+        .bind(user_id)
+        .bind(email)
+        .bind(display_name)
+        .bind(avatar_url)
+        .bind(google_id)
+        .bind(email)
+        .bind(user_type_to_db(user_type))
+        .bind(base_status_to_db(user_status))
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(&format!(
+            "INSERT INTO {organizations} (id, name, owner_user_id, status) VALUES (?, ?, ?, ?)"
+        ))
+        .bind(org_id)
+        .bind(org_name)
+        .bind(user_id)
+        .bind(base_status_to_db(crate::pb::common::base::BaseStatus::BsActive))
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(&format!(
+            "INSERT INTO {organization_members} (org_id, user_id, org_role, status) VALUES (?, ?, ?, ?)"
+        ))
+        .bind(org_id)
+        .bind(user_id)
+        .bind(org_role_to_db(org_role))
+        .bind(member_status_to_db(membership_status))
+        .execute(&mut *tx)
+        .await?;
+
+        // Insert oauth provider row
+        let provider_id = uuid::Uuid::new_v4().to_string();
+        let now = philand_time::now_unix();
+        sqlx::query(
+            "INSERT INTO user_oauth_providers (id, user_id, provider, provider_id, email, created_at)
+             VALUES (?, ?, 'google', ?, ?, ?)"
+        )
+        .bind(&provider_id).bind(user_id).bind(google_id).bind(email).bind(now)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        self.find_user_by_id(user_id)
+            .await?
+            .ok_or(sqlx::Error::RowNotFound)
+    }
 }
 
 fn map_storage_error(err: philand_storage::StorageError) -> sqlx::Error {
@@ -1138,6 +1258,9 @@ fn map_to_db_user(row: Map<String, Value>) -> DbUser {
         locale: string_field(&row, "locale"),
         user_type: string_field(&row, "user_type"),
         status: string_field(&row, "status"),
+        google_id: opt_string_field(&row, "google_id"),
+        google_email: opt_string_field(&row, "google_email"),
+        google_avatar: opt_string_field(&row, "google_avatar"),
         created_at: datetime_field(&row, "created_at"),
         updated_at: datetime_field(&row, "updated_at"),
         deleted_at: opt_datetime_field(&row, "deleted_at"),
