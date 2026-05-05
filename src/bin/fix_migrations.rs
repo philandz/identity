@@ -7,9 +7,10 @@ async fn main() -> anyhow::Result<()> {
     let pool = sqlx::MySqlPool::connect(&database_url).await?;
 
     // Show current state
-    let rows = sqlx::query("SELECT version, description, success FROM _sqlx_migrations ORDER BY version")
-        .fetch_all(&pool)
-        .await?;
+    let rows =
+        sqlx::query("SELECT version, description, success FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(&pool)
+            .await?;
     println!("Current migrations in DB:");
     for row in &rows {
         use sqlx::Row;
@@ -36,7 +37,11 @@ async fn main() -> anyhow::Result<()> {
                 .bind(v)
                 .execute(&pool)
                 .await?;
-            println!("Deleted migration {} ({} rows affected)", v, r.rows_affected());
+            println!(
+                "Deleted migration {} ({} rows affected)",
+                v,
+                r.rows_affected()
+            );
         }
     }
 
