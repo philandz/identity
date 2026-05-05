@@ -2,6 +2,7 @@
 name = "identity"
 version = "0.1.0"
 edition = "2021"
+default-run = "identity"
 
 [build-dependencies]
 tonic-build = "0.12"

@@ -1,5 +1,16 @@
 use chrono::{DateTime, Utc};
+use serde::Deserialize;
 use tonic::Status;
+
+#[derive(Debug, Deserialize)]
+struct GoogleTokenInfo {
+    sub: String,           // Google user ID
+    email: String,
+    email_verified: Option<String>,
+    name: Option<String>,
+    picture: Option<String>,
+    aud: String,           // audience (client ID)
+}
 
 use crate::converters::user_type_from_db;
 use crate::manager::validate;
@@ -166,6 +177,134 @@ impl IdentityBiz {
             .map_err(Self::map_internal_error)?;
 
         Ok(LogoutResponse {})
+    }
+
+    /// Login with Google ID token.
+    ///
+    /// Verifies the token against Google's tokeninfo endpoint, then:
+    /// - If the Google account is already linked → load user, issue JWT
+    /// - If the email exists → link Google to existing account, issue JWT
+    /// - Otherwise → create new user + default org, issue JWT
+    pub async fn login_with_google(&self, id_token: &str) -> Result<LoginResponse, Status> {
+        if id_token.trim().is_empty() {
+            return Err(Status::invalid_argument("id_token must not be empty"));
+        }
+
+        // Verify the ID token with Google
+        let google_info = self.verify_google_id_token(id_token).await?;
+
+        // Try to find existing user by google_id
+        let db_user = if let Some(user) = self.repo
+            .find_user_by_google_id(&google_info.sub)
+            .await
+            .map_err(Self::map_internal_error)?
+        {
+            user
+        } else if let Some(mut user) = self.repo
+            .find_user_by_email(&google_info.email)
+            .await
+            .map_err(Self::map_internal_error)?
+        {
+            // Link Google to existing email account
+            self.repo
+                .link_google_to_user(&user.id, &google_info.sub, &google_info.email)
+                .await
+                .map_err(Self::map_internal_error)?;
+            // Refresh user row
+            user = self.repo
+                .find_user_by_id(&user.id)
+                .await
+                .map_err(Self::map_internal_error)?
+                .ok_or_else(|| Status::internal("User disappeared after Google link"))?;
+            user
+        } else {
+            // Create new user with default org
+            let user_id = uuid::Uuid::new_v4().to_string();
+            let org_id = uuid::Uuid::new_v4().to_string();
+            let display_name = google_info.name.clone()
+                .unwrap_or_else(|| google_info.email.split('@').next().unwrap_or("User").to_string());
+            let org_name = format!("{}'s Organization", display_name.trim());
+
+            use crate::pb::common::base::BaseStatus;
+            use crate::pb::shared::organization::{MemberStatus, OrgRole};
+            use crate::pb::shared::user::UserType;
+
+            self.repo
+                .create_google_user_with_default_organization(
+                    &user_id,
+                    &google_info.email,
+                    &display_name,
+                    google_info.picture.as_deref(),
+                    &google_info.sub,
+                    UserType::UtNormal,
+                    BaseStatus::BsActive,
+                    &org_id,
+                    &org_name,
+                    OrgRole::OrOwner,
+                    MemberStatus::MsActive,
+                )
+                .await
+                .map_err(Self::map_internal_error)?
+        };
+
+        let org_rows = self.repo
+            .find_user_org_summaries(&db_user.id)
+            .await
+            .map_err(Self::map_internal_error)?;
+
+        let default_org_id = org_rows.first().map(|r| r.id.as_str()).unwrap_or("");
+        let token = self.issue_jwt(&db_user, default_org_id)?;
+
+        use crate::converters::user_type_from_db;
+        let user_type_enum = user_type_from_db(&db_user.user_type);
+
+        let organizations = org_rows
+            .into_iter()
+            .map(|r| OrganizationSummary {
+                id: r.id,
+                name: r.name,
+                role: r.role as i32,
+            })
+            .collect();
+
+        Ok(LoginResponse {
+            access_token: token,
+            user_type: user_type_enum as i32,
+            organizations,
+        })
+    }
+
+    /// Verify a Google ID token using Google's tokeninfo endpoint.
+    async fn verify_google_id_token(&self, id_token: &str) -> Result<GoogleTokenInfo, Status> {
+        let url = format!(
+            "https://oauth2.googleapis.com/tokeninfo?id_token={}",
+            id_token
+        );
+        let resp = reqwest::get(&url)
+            .await
+            .map_err(|e| Status::internal(format!("Google tokeninfo request failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            return Err(Status::unauthenticated("Invalid Google ID token"));
+        }
+
+        let info: GoogleTokenInfo = resp
+            .json()
+            .await
+            .map_err(|e| Status::internal(format!("Failed to parse Google tokeninfo: {e}")))?;
+
+        // Verify the token was issued for our client
+        if !self.config.google_client_id.is_empty()
+            && info.aud != self.config.google_client_id
+        {
+            return Err(Status::unauthenticated("Google token audience mismatch"));
+        }
+
+        if info.email.is_empty() {
+            return Err(Status::unauthenticated("Google token missing email"));
+        }
+
+        Ok(info)
     }
 
     /// Refresh: issue a new JWT with a fresh 24h window, revoke the old one.

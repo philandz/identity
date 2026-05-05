@@ -95,6 +95,15 @@ impl IdentityService for IdentityHandler {
         Ok(Response::new(resp))
     }
 
+    async fn login_with_google(
+        &self,
+        request: Request<crate::pb::service::identity::LoginWithGoogleRequest>,
+    ) -> Result<Response<LoginResponse>, Status> {
+        let req = request.into_inner();
+        let resp = self.biz.login_with_google(&req.id_token).await?;
+        Ok(Response::new(resp))
+    }
+
     async fn get_profile(
         &self,
         request: Request<GetProfileRequest>,
