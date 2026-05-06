@@ -4,6 +4,7 @@ use chrono::{Duration, Utc};
 
 use crate::manager::repository::UpsertOrganizationInvitationParams;
 use crate::manager::validate;
+use crate::pb::common::base::BaseStatus;
 use crate::pb::service::identity::{
     AcceptInvitationResponse, ChangeOrgMemberRoleResponse, InviteMemberResponse,
     ListOrgMembersResponse, ListOrganizationsResponse, OrgMemberView, OrganizationInvitation,
@@ -27,7 +28,16 @@ impl IdentityBiz {
             .map_err(Self::map_internal_error)?
             .into_iter()
             .map(|o| OrganizationSummary {
-                id: o.id,
+                base: Some(crate::pb::common::base::Base {
+                    id: o.id,
+                    created_at: 0,
+                    updated_at: 0,
+                    deleted_at: 0,
+                    created_by: String::new(),
+                    updated_by: String::new(),
+                    owner_id: String::new(),
+                    status: BaseStatus::BsActive as i32,
+                }),
                 name: o.name,
                 role: org_role_from_db(&o.org_role) as i32,
             })
@@ -145,14 +155,22 @@ impl IdentityBiz {
 
         Ok(InviteMemberResponse {
             invitation: Some(OrganizationInvitation {
-                id: invitation_id,
+                base: Some(crate::pb::common::base::Base {
+                    id: invitation_id,
+                    created_at: now.timestamp(),
+                    updated_at: 0,
+                    deleted_at: 0,
+                    created_by: caller_user_id.to_string(),
+                    updated_by: String::new(),
+                    owner_id: org_id.to_string(),
+                    status: BaseStatus::BsActive as i32,
+                }),
                 org_id: org_id.to_string(),
                 inviter_id: caller_user_id.to_string(),
                 invitee_email: normalized_email,
                 org_role: role as i32,
                 status: InvitationStatus::IsPending as i32,
                 expires_at: expires_at.timestamp(),
-                created_at: now.timestamp(),
             }),
             invite_token: raw_token,
         })
