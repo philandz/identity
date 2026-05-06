@@ -227,8 +227,8 @@ impl From<DbUser> for user::User {
                 deleted_at: db_user.deleted_at.map(|t| t.timestamp()).unwrap_or(0),
                 created_by: db_user.created_by.unwrap_or_default(),
                 updated_by: db_user.updated_by.unwrap_or_default(),
+                owner_id: String::new(),
                 status: status as i32,
-                ..Default::default()
             }),
             email: db_user.email,
             password_hash: db_user.password_hash,
