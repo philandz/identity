@@ -448,7 +448,8 @@ impl IdentityRepository {
         let active_status = member_status_to_db(MemberStatus::MsActive);
 
         sqlx::query_as::<_, DbUserOrganization>(&format!(
-            "SELECT o.id, o.name, om.org_role \
+            "SELECT o.id, o.name, om.org_role, o.owner_user_id, o.status, \
+                    o.created_at, o.updated_at, o.deleted_at, o.created_by, o.updated_by \
              FROM {organizations} o \
              INNER JOIN {org_members} om ON o.id = om.org_id \
              WHERE om.user_id = ? AND om.status = ?"

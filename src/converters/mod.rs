@@ -65,6 +65,13 @@ pub struct DbUserOrganization {
     pub id: String,
     pub name: String,
     pub org_role: String,
+    pub owner_user_id: String,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_by: Option<String>,
+    pub updated_by: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
