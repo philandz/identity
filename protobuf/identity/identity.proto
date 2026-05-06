@@ -118,7 +118,7 @@ message LoginResponse {
 }
 
 message OrganizationSummary {
-  string id = 1;
+  common.base.Base base = 1;
   string name = 2;
   shared.organization.OrgRole role = 3;
 }
@@ -197,14 +197,13 @@ message OrgMemberView {
 }
 
 message OrganizationInvitation {
-  string id = 1;
+  common.base.Base base = 1;
   string org_id = 2;
   string inviter_id = 3;
   string invitee_email = 4;
   shared.organization.OrgRole org_role = 5;
   shared.organization.InvitationStatus status = 6;
   int64 expires_at = 7;
-  int64 created_at = 8;
 }
 
 message ListOrgMembersRequest {
