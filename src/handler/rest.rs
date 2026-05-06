@@ -619,7 +619,7 @@ async fn login(
         .organizations
         .iter()
         .map(|o| OrgSummary {
-            id: o.id.clone(),
+            id: o.base.as_ref().map(|b| b.id.clone()).unwrap_or_default(),
             name: o.name.clone(),
             role: org_role_label(o.role),
         })
@@ -764,7 +764,7 @@ async fn list_organizations(
                 OrgRole::OrNone => "none",
             };
             OrgSummaryResponse {
-                id: o.id.clone(),
+                id: o.base.as_ref().map(|b| b.id.clone()).unwrap_or_default(),
                 name: o.name.clone(),
                 role: role.to_string(),
             }
@@ -989,7 +989,11 @@ async fn invite_member(
         .ok_or_else(|| map_status(&Status::internal("Invitation payload missing")))?;
 
     Ok(Json(InviteMemberResponse {
-        invitation_id: invitation.id,
+        invitation_id: invitation
+            .base
+            .as_ref()
+            .map(|b| b.id.clone())
+            .unwrap_or_default(),
         invitee_email: invitation.invitee_email,
         org_role: org_role_label(invitation.org_role),
         status: "pending".to_string(),

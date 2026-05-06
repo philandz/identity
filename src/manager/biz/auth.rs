@@ -152,7 +152,16 @@ impl IdentityBiz {
         let organizations = org_rows
             .into_iter()
             .map(|r| OrganizationSummary {
-                id: r.id,
+                base: Some(crate::pb::common::base::Base {
+                    id: r.id,
+                    created_at: 0,
+                    updated_at: 0,
+                    deleted_at: 0,
+                    created_by: String::new(),
+                    updated_by: String::new(),
+                    owner_id: String::new(),
+                    status: BaseStatus::BsActive as i32,
+                }),
                 name: r.name,
                 role: r.role as i32,
             })
@@ -278,7 +287,16 @@ impl IdentityBiz {
         let organizations = org_rows
             .into_iter()
             .map(|r| OrganizationSummary {
-                id: r.id,
+                base: Some(crate::pb::common::base::Base {
+                    id: r.id,
+                    created_at: 0,
+                    updated_at: 0,
+                    deleted_at: 0,
+                    created_by: String::new(),
+                    updated_by: String::new(),
+                    owner_id: String::new(),
+                    status: BaseStatus::BsActive as i32,
+                }),
                 name: r.name,
                 role: r.role as i32,
             })
