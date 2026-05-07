@@ -81,6 +81,7 @@ impl IdentityBiz {
                 role: m.role as i32,
                 status: m.status as i32,
                 joined_at: m.joined_at,
+                avatar: m.avatar.unwrap_or_default(),
             })
             .collect();
 
