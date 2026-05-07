@@ -14,9 +14,9 @@ struct GoogleTokenInfo {
     aud: String, // audience (client ID)
 }
 
-use crate::converters::{base_status_from_db, org_role_from_db, user_type_from_db};
+use crate::converters::user_type_from_db;
 use crate::manager::validate;
-use crate::pb::common::base::{Base, BaseStatus};
+use crate::pb::common::base::BaseStatus;
 use crate::pb::service::identity::{
     LoginResponse, LogoutResponse, OrganizationSummary, RefreshTokenResponse, RegisterResponse,
 };
@@ -141,7 +141,7 @@ impl IdentityBiz {
 
         let org_rows = self
             .repo
-            .find_user_organizations(&db_user.id)
+            .find_user_org_summaries(&db_user.id)
             .await
             .map_err(Self::map_internal_error)?;
 
@@ -151,22 +151,19 @@ impl IdentityBiz {
 
         let organizations = org_rows
             .into_iter()
-            .map(|r| {
-                let status = base_status_from_db(&r.status);
-                OrganizationSummary {
-                    base: Some(Base {
-                        id: r.id,
-                        created_at: r.created_at.timestamp(),
-                        updated_at: r.updated_at.timestamp(),
-                        deleted_at: r.deleted_at.map(|t| t.timestamp()).unwrap_or(0),
-                        created_by: r.created_by.unwrap_or_default(),
-                        updated_by: r.updated_by.unwrap_or_default(),
-                        owner_id: r.owner_user_id,
-                        status: status as i32,
-                    }),
-                    name: r.name,
-                    role: org_role_from_db(&r.org_role) as i32,
-                }
+            .map(|r| OrganizationSummary {
+                base: Some(crate::pb::common::base::Base {
+                    id: r.id,
+                    created_at: 0,
+                    updated_at: 0,
+                    deleted_at: 0,
+                    created_by: String::new(),
+                    updated_by: String::new(),
+                    owner_id: String::new(),
+                    status: BaseStatus::BsActive as i32,
+                }),
+                name: r.name,
+                role: r.role as i32,
             })
             .collect();
 
@@ -253,6 +250,10 @@ impl IdentityBiz {
             });
             let org_name = format!("{}'s Organization", display_name.trim());
 
+            use crate::pb::common::base::BaseStatus;
+            use crate::pb::shared::organization::{MemberStatus, OrgRole};
+            use crate::pb::shared::user::UserType;
+
             self.repo
                 .create_google_user_with_default_organization(
                     &user_id,
@@ -273,7 +274,7 @@ impl IdentityBiz {
 
         let org_rows = self
             .repo
-            .find_user_organizations(&db_user.id)
+            .find_user_org_summaries(&db_user.id)
             .await
             .map_err(Self::map_internal_error)?;
 
@@ -285,22 +286,19 @@ impl IdentityBiz {
 
         let organizations = org_rows
             .into_iter()
-            .map(|r| {
-                let status = base_status_from_db(&r.status);
-                OrganizationSummary {
-                    base: Some(Base {
-                        id: r.id,
-                        created_at: r.created_at.timestamp(),
-                        updated_at: r.updated_at.timestamp(),
-                        deleted_at: r.deleted_at.map(|t| t.timestamp()).unwrap_or(0),
-                        created_by: r.created_by.unwrap_or_default(),
-                        updated_by: r.updated_by.unwrap_or_default(),
-                        owner_id: r.owner_user_id,
-                        status: status as i32,
-                    }),
-                    name: r.name,
-                    role: org_role_from_db(&r.org_role) as i32,
-                }
+            .map(|r| OrganizationSummary {
+                base: Some(crate::pb::common::base::Base {
+                    id: r.id,
+                    created_at: 0,
+                    updated_at: 0,
+                    deleted_at: 0,
+                    created_by: String::new(),
+                    updated_by: String::new(),
+                    owner_id: String::new(),
+                    status: BaseStatus::BsActive as i32,
+                }),
+                name: r.name,
+                role: r.role as i32,
             })
             .collect();
 
@@ -360,7 +358,7 @@ impl IdentityBiz {
         // Determine default org (same logic as login)
         let org_rows = self
             .repo
-            .find_user_organizations(&db_user.id)
+            .find_user_org_summaries(&db_user.id)
             .await
             .map_err(Self::map_internal_error)?;
         let default_org_id = org_rows.first().map(|r| r.id.as_str()).unwrap_or("");
