@@ -34,7 +34,11 @@ async fn setup() -> (IdentityServiceClient<tonic::transport::Channel>, MySqlPool
         std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for integration tests");
     let pool = MySqlPool::connect(&database_url).await.unwrap();
 
-    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+    // Local dev DBs may have extra migration versions applied from other branches.
+    // Allow that here so integration tests can still run.
+    let mut migrator = sqlx::migrate!("./migrations");
+    migrator.set_ignore_missing(true);
+    migrator.run(&pool).await.unwrap();
 
     // Clean tables
     sqlx::query("DELETE FROM organization_invitations")
@@ -480,7 +484,12 @@ async fn test_p1_invite_accept_and_list_org_members() {
         .unwrap()
         .into_inner();
     let owner_token = owner_login.access_token;
-    let org_id = owner_login.organizations[0].id.clone();
+    let org_id = owner_login.organizations[0]
+        .base
+        .as_ref()
+        .unwrap()
+        .id
+        .clone();
 
     // Invitee account must exist
     let invitee_email = "invitee-p1@example.com";
@@ -565,7 +574,12 @@ async fn test_p1_change_role_and_remove_member() {
         .unwrap()
         .into_inner();
     let owner_token = owner_login.access_token;
-    let org_id = owner_login.organizations[0].id.clone();
+    let org_id = owner_login.organizations[0]
+        .base
+        .as_ref()
+        .unwrap()
+        .id
+        .clone();
 
     let invite = client
         .invite_member(with_bearer(
@@ -686,7 +700,12 @@ async fn test_p1_non_member_cannot_list_org_members() {
         .await
         .unwrap()
         .into_inner();
-    let org_id = owner_login.organizations[0].id.clone();
+    let org_id = owner_login.organizations[0]
+        .base
+        .as_ref()
+        .unwrap()
+        .id
+        .clone();
 
     let outsider_login = client
         .login(Request::new(LoginRequest {

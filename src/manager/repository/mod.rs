@@ -448,7 +448,8 @@ impl IdentityRepository {
         let active_status = member_status_to_db(MemberStatus::MsActive);
 
         sqlx::query_as::<_, DbUserOrganization>(&format!(
-            "SELECT o.id, o.name, om.org_role \
+            "SELECT o.id, o.name, om.org_role, o.owner_user_id, o.status, \
+                    o.created_at, o.updated_at, o.deleted_at, o.created_by, o.updated_by \
              FROM {organizations} o \
              INNER JOIN {org_members} om ON o.id = om.org_id \
              WHERE om.user_id = ? AND om.status = ?"
@@ -1120,7 +1121,10 @@ impl IdentityRepository {
     // Google OAuth
     // -----------------------------------------------------------------------
 
-    pub async fn find_user_by_google_id(&self, google_id: &str) -> Result<Option<DbUser>, sqlx::Error> {
+    pub async fn find_user_by_google_id(
+        &self,
+        google_id: &str,
+    ) -> Result<Option<DbUser>, sqlx::Error> {
         let users = table_name(philand_table::table::USERS);
         let row = sqlx::query_as::<_, DbUser>(&format!(
             "SELECT * FROM {users} WHERE google_id = ? LIMIT 1"
@@ -1204,7 +1208,9 @@ impl IdentityRepository {
         .bind(org_id)
         .bind(org_name)
         .bind(user_id)
-        .bind(base_status_to_db(crate::pb::common::base::BaseStatus::BsActive))
+        .bind(base_status_to_db(
+            crate::pb::common::base::BaseStatus::BsActive,
+        ))
         .execute(&mut *tx)
         .await?;
 

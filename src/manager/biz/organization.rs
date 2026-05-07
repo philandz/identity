@@ -2,8 +2,10 @@ use tonic::Status;
 
 use chrono::{Duration, Utc};
 
+use crate::converters::base_status_from_db;
 use crate::manager::repository::UpsertOrganizationInvitationParams;
 use crate::manager::validate;
+use crate::pb::common::base::{Base, BaseStatus};
 use crate::pb::service::identity::{
     AcceptInvitationResponse, ChangeOrgMemberRoleResponse, InviteMemberResponse,
     ListOrgMembersResponse, ListOrganizationsResponse, OrgMemberView, OrganizationInvitation,
@@ -26,10 +28,22 @@ impl IdentityBiz {
             .await
             .map_err(Self::map_internal_error)?
             .into_iter()
-            .map(|o| OrganizationSummary {
-                id: o.id,
-                name: o.name,
-                role: org_role_from_db(&o.org_role) as i32,
+            .map(|o| {
+                let status = base_status_from_db(&o.status);
+                OrganizationSummary {
+                    base: Some(Base {
+                        id: o.id,
+                        created_at: o.created_at.timestamp(),
+                        updated_at: o.updated_at.timestamp(),
+                        deleted_at: o.deleted_at.map(|t| t.timestamp()).unwrap_or(0),
+                        created_by: o.created_by.unwrap_or_default(),
+                        updated_by: o.updated_by.unwrap_or_default(),
+                        owner_id: o.owner_user_id,
+                        status: status as i32,
+                    }),
+                    name: o.name,
+                    role: org_role_from_db(&o.org_role) as i32,
+                }
             })
             .collect();
 
@@ -145,14 +159,22 @@ impl IdentityBiz {
 
         Ok(InviteMemberResponse {
             invitation: Some(OrganizationInvitation {
-                id: invitation_id,
+                base: Some(Base {
+                    id: invitation_id,
+                    created_at: now.timestamp(),
+                    updated_at: now.timestamp(),
+                    deleted_at: 0,
+                    created_by: caller_user_id.to_string(),
+                    updated_by: String::new(),
+                    owner_id: caller_user_id.to_string(),
+                    status: BaseStatus::BsPending as i32,
+                }),
                 org_id: org_id.to_string(),
                 inviter_id: caller_user_id.to_string(),
                 invitee_email: normalized_email,
                 org_role: role as i32,
                 status: InvitationStatus::IsPending as i32,
                 expires_at: expires_at.timestamp(),
-                created_at: now.timestamp(),
             }),
             invite_token: raw_token,
         })

@@ -65,6 +65,13 @@ pub struct DbUserOrganization {
     pub id: String,
     pub name: String,
     pub org_role: String,
+    pub owner_user_id: String,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+    pub deleted_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_by: Option<String>,
+    pub updated_by: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -220,8 +227,8 @@ impl From<DbUser> for user::User {
                 deleted_at: db_user.deleted_at.map(|t| t.timestamp()).unwrap_or(0),
                 created_by: db_user.created_by.unwrap_or_default(),
                 updated_by: db_user.updated_by.unwrap_or_default(),
+                owner_id: String::new(),
                 status: status as i32,
-                ..Default::default()
             }),
             email: db_user.email,
             password_hash: db_user.password_hash,
