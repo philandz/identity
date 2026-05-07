@@ -2,9 +2,10 @@ use tonic::Status;
 
 use chrono::{Duration, Utc};
 
+use crate::converters::base_status_from_db;
 use crate::manager::repository::UpsertOrganizationInvitationParams;
 use crate::manager::validate;
-use crate::pb::common::base::BaseStatus;
+use crate::pb::common::base::{Base, BaseStatus};
 use crate::pb::service::identity::{
     AcceptInvitationResponse, ChangeOrgMemberRoleResponse, InviteMemberResponse,
     ListOrgMembersResponse, ListOrganizationsResponse, OrgMemberView, OrganizationInvitation,
@@ -27,19 +28,22 @@ impl IdentityBiz {
             .await
             .map_err(Self::map_internal_error)?
             .into_iter()
-            .map(|o| OrganizationSummary {
-                base: Some(crate::pb::common::base::Base {
-                    id: o.id,
-                    created_at: 0,
-                    updated_at: 0,
-                    deleted_at: 0,
-                    created_by: String::new(),
-                    updated_by: String::new(),
-                    owner_id: String::new(),
-                    status: BaseStatus::BsActive as i32,
-                }),
-                name: o.name,
-                role: org_role_from_db(&o.org_role) as i32,
+            .map(|o| {
+                let status = base_status_from_db(&o.status);
+                OrganizationSummary {
+                    base: Some(Base {
+                        id: o.id,
+                        created_at: o.created_at.timestamp(),
+                        updated_at: o.updated_at.timestamp(),
+                        deleted_at: o.deleted_at.map(|t| t.timestamp()).unwrap_or(0),
+                        created_by: o.created_by.unwrap_or_default(),
+                        updated_by: o.updated_by.unwrap_or_default(),
+                        owner_id: o.owner_user_id,
+                        status: status as i32,
+                    }),
+                    name: o.name,
+                    role: org_role_from_db(&o.org_role) as i32,
+                }
             })
             .collect();
 
@@ -77,6 +81,7 @@ impl IdentityBiz {
                 role: m.role as i32,
                 status: m.status as i32,
                 joined_at: m.joined_at,
+                avatar: m.avatar.unwrap_or_default(),
             })
             .collect();
 
@@ -155,15 +160,15 @@ impl IdentityBiz {
 
         Ok(InviteMemberResponse {
             invitation: Some(OrganizationInvitation {
-                base: Some(crate::pb::common::base::Base {
+                base: Some(Base {
                     id: invitation_id,
                     created_at: now.timestamp(),
-                    updated_at: 0,
+                    updated_at: now.timestamp(),
                     deleted_at: 0,
                     created_by: caller_user_id.to_string(),
                     updated_by: String::new(),
-                    owner_id: org_id.to_string(),
-                    status: BaseStatus::BsActive as i32,
+                    owner_id: caller_user_id.to_string(),
+                    status: BaseStatus::BsPending as i32,
                 }),
                 org_id: org_id.to_string(),
                 inviter_id: caller_user_id.to_string(),

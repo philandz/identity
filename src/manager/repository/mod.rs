@@ -40,6 +40,7 @@ pub struct OrgMemberRow {
     pub role: OrgRole,
     pub status: MemberStatus,
     pub joined_at: i64,
+    pub avatar: Option<String>,
 }
 
 pub struct OrganizationInvitationRow {
@@ -448,7 +449,8 @@ impl IdentityRepository {
         let active_status = member_status_to_db(MemberStatus::MsActive);
 
         sqlx::query_as::<_, DbUserOrganization>(&format!(
-            "SELECT o.id, o.name, om.org_role \
+            "SELECT o.id, o.name, om.org_role, o.owner_user_id, o.status, \
+                    o.created_at, o.updated_at, o.deleted_at, o.created_by, o.updated_by \
              FROM {organizations} o \
              INNER JOIN {org_members} om ON o.id = om.org_id \
              WHERE om.user_id = ? AND om.status = ?"
@@ -780,7 +782,7 @@ impl IdentityRepository {
         let users = table_name(philand_table::table::USERS);
 
         let rows = sqlx::query(&format!(
-            "SELECT om.user_id, u.email, u.display_name, om.org_role, om.status, om.joined_at \
+            "SELECT om.user_id, u.email, u.display_name, u.avatar, om.org_role, om.status, om.joined_at \
              FROM {org_members} om \
              INNER JOIN {users} u ON om.user_id = u.id \
              WHERE om.org_id = ? \
@@ -797,6 +799,7 @@ impl IdentityRepository {
                     user_id: row.try_get("user_id")?,
                     email: row.try_get("email")?,
                     display_name: row.try_get("display_name")?,
+                    avatar: row.try_get("avatar")?,
                     role: org_role_from_db(&row.try_get::<String, _>("org_role")?),
                     status: member_status_from_db(&row.try_get::<String, _>("status")?),
                     joined_at: row
