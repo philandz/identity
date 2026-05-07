@@ -989,7 +989,11 @@ async fn invite_member(
         .ok_or_else(|| map_status(&Status::internal("Invitation payload missing")))?;
 
     Ok(Json(InviteMemberResponse {
-        invitation_id: invitation.base.as_ref().map(|b| b.id.clone()).unwrap_or_default(),
+        invitation_id: invitation
+            .base
+            .as_ref()
+            .map(|b| b.id.clone())
+            .unwrap_or_default(),
         invitee_email: invitation.invitee_email,
         org_role: org_role_label(invitation.org_role),
         status: "pending".to_string(),
