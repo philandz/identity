@@ -37,6 +37,7 @@ pub struct OrgMemberRow {
     pub user_id: String,
     pub email: String,
     pub display_name: String,
+    pub avatar: Option<String>,
     pub role: OrgRole,
     pub status: MemberStatus,
     pub joined_at: i64,
@@ -781,7 +782,7 @@ impl IdentityRepository {
         let users = table_name(philand_table::table::USERS);
 
         let rows = sqlx::query(&format!(
-            "SELECT om.user_id, u.email, u.display_name, om.org_role, om.status, om.joined_at \
+            "SELECT om.user_id, u.email, u.display_name, u.avatar, om.org_role, om.status, om.joined_at \
              FROM {org_members} om \
              INNER JOIN {users} u ON om.user_id = u.id \
              WHERE om.org_id = ? \
@@ -798,6 +799,7 @@ impl IdentityRepository {
                     user_id: row.try_get("user_id")?,
                     email: row.try_get("email")?,
                     display_name: row.try_get("display_name")?,
+                    avatar: row.try_get("avatar")?,
                     role: org_role_from_db(&row.try_get::<String, _>("org_role")?),
                     status: member_status_from_db(&row.try_get::<String, _>("status")?),
                     joined_at: row
