@@ -20,4 +20,3 @@ jobs:
             echo "See git flow policy in CLAUDE.md."
             exit 1
           fi
-
