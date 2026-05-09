@@ -1136,6 +1136,7 @@ dependencies = [
  "env",
  "error",
  "headers",
+ "identity_table",
  "jsonwebtoken",
  "logging",
  "notify",
@@ -1150,7 +1151,6 @@ dependencies = [
  "sqlx",
  "ssh",
  "storage",
- "table",
  "thiserror 1.0.69",
  "time 0.1.0",
  "tokio",
@@ -1165,6 +1165,10 @@ dependencies = [
  "uuid",
  "validator",
 ]
+
+[[package]]
+name = "identity_table"
+version = "0.1.0"
 
 [[package]]
 name = "idna"
