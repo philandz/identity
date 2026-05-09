@@ -72,9 +72,9 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     // Seed the initial super-admin user (idempotent — skips if already exists)
-    biz.init_super_admin()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to init super admin: {}", e.message()))?;
+    if let Err(e) = biz.init_super_admin().await {
+        tracing::warn!("Failed to init super admin (may already exist): {}", e.message());
+    }
 
     let grpc_handler = IdentityHandler::new(biz.clone());
 

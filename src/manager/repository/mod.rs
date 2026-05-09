@@ -37,6 +37,7 @@ pub struct OrgMemberRow {
     pub user_id: String,
     pub email: String,
     pub display_name: String,
+    pub avatar: Option<String>,
     pub role: OrgRole,
     pub status: MemberStatus,
     pub joined_at: i64,
