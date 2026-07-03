@@ -68,7 +68,12 @@ async fn setup() -> (IdentityServiceClient<tonic::transport::Channel>, MySqlPool
 
     let config = philand_configs::IdentityServiceConfig::from_env().expect("identity config");
     let repo = IdentityRepository::from_pool(Arc::new(pool.clone()));
-    let biz = Arc::new(IdentityBiz::new(repo, config, None));
+    let biz = Arc::new(IdentityBiz::new(
+        repo,
+        config,
+        None,
+        Arc::new(philand_notify::NoopMailer::new()),
+    ));
     let handler = IdentityHandler::new(biz);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

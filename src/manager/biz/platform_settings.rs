@@ -10,6 +10,8 @@
 //! reloaded from the DB by the Super Admin → System Config RPCs — no service
 //! restart needed when the admin updates them.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use tonic::Status;
 
@@ -439,20 +441,28 @@ impl IdentityBiz {
 
 /// Convenience for `main.rs` to construct the [`philand_notify::ApiKeySource`]
 /// from the live DB state, falling back to env if the DB is empty.
-pub async fn build_api_key_source(
-    biz: &IdentityBiz,
-) -> Result<philand_notify::ApiKeySource, Status> {
-    match biz.resolve_resend_api_key().await? {
-        Some(key) => Ok(philand_notify::ApiKeySource::Db(philand_notify::DbKeyResolver::new(
-            move || Some(key.clone()),
-        ))),
-        None => match std::env::var("RESEND_API_KEY") {
-            Ok(v) if !v.trim().is_empty() => Ok(philand_notify::ApiKeySource::Env(v)),
-            _ => Ok(philand_notify::ApiKeySource::Db(philand_notify::DbKeyResolver::new(
-                || None,
-            ))),
-        },
-    }
+///
+/// The DB variant runs an **async** lookup on every send so admin rotation
+/// of the Resend API key from the Super Admin → Global Settings page is
+/// observed without a service restart. Captures the placeholder `IdentityBiz`
+/// by `Arc` so the fetcher can call into `biz.resolve_resend_api_key().await`.
+pub fn build_api_key_source(
+    biz: Arc<IdentityBiz>,
+) -> philand_notify::ApiKeySource {
+    let fetcher: philand_notify::AsyncKeyFetcher = std::sync::Arc::new(move || {
+        let biz = biz.clone();
+        Box::pin(async move {
+            match biz.resolve_resend_api_key().await {
+                Ok(Some(k)) => Some(k),
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::warn!("resend key resolver failed: {e}");
+                    None
+                }
+            }
+        })
+    });
+    philand_notify::ApiKeySource::Db(fetcher)
 }
 
 /// Resolve a single field through the precedence chain: DB blob → live

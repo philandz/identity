@@ -58,9 +58,10 @@ async fn main() -> anyhow::Result<()> {
     let notify_enabled = philand_env::bool_flag("NOTIFY_ENABLED", false);
     let (notify_tx, notify_rx) = philand_queue::bounded(256);
 
-    // Mailer — DB-stored Resend key (with env fallback). The DbKeyResolver
-    // re-reads the platform_settings table per send so admin rotation from
-    // the Super Admin → Global Settings page is observed without restart.
+    // Mailer — DB-stored Resend key (with env fallback inside the resolver).
+    // The resolver is async-aware: it re-queries the platform_settings table
+    // on every send so admin rotation from the Super Admin → Global Settings
+    // page is observed without a service restart.
     let mailer: Arc<dyn philand_notify::Mailer> = {
         let placeholder_biz_for_key: Arc<IdentityBiz> = Arc::new(IdentityBiz::new(
             repo.clone(),
@@ -68,13 +69,11 @@ async fn main() -> anyhow::Result<()> {
             None,
             Arc::new(philand_notify::NoopMailer::new()),
         ));
-        let source = platform_settings::build_api_key_source(&placeholder_biz_for_key)
-            .await
-            .unwrap_or_else(|_| {
-                philand_notify::ApiKeySource::Db(philand_notify::DbKeyResolver::new(|| None))
-            });
+        let source = platform_settings::build_api_key_source(placeholder_biz_for_key.clone());
 
-        if matches!(source, philand_notify::ApiKeySource::Db(_)) {
+        // Log a startup hint when neither the DB nor env has a key yet — this
+        // tells the operator to configure one before the first email goes out.
+        if let Ok(None) = placeholder_biz_for_key.resolve_resend_api_key().await {
             tracing::warn!(
                 "Resend API key not configured (set platform_settings.resend_api_key or RESEND_API_KEY) — \
                  email delivery will be a no-op until configured."
