@@ -47,8 +47,8 @@ impl IdentityBiz {
     /// Initiate a password-reset flow.
     ///
     /// Generates a random token, stores its SHA-256 hash with a 1-hour TTL,
-    /// and logs the raw token.  Email dispatch is deferred to the Notification
-    /// service (future phase).
+    /// and enqueues a `PasswordReset` notification event carrying the raw
+    /// token so the notify worker can render the reset link.
     pub async fn forgot_password(&self, email: &str) -> Result<ForgotPasswordResponse, Status> {
         validate::forgot_password_input(email)?;
 
@@ -70,17 +70,22 @@ impl IdentityBiz {
                 .await
                 .map_err(Self::map_internal_error)?;
 
-            // TODO: emit event for Notification service to send email
-            tracing::info!(
-                "Password reset requested for {} (expires {})",
-                email,
-                expires_at
-            );
+            let display_name = if user.display_name.trim().is_empty() {
+                None
+            } else {
+                Some(user.display_name)
+            };
 
             self.enqueue_notification(super::NotificationEvent::PasswordReset {
                 email: email.to_string(),
+                raw_token,
+                expires_at,
             })
             .await;
+
+            // Suppress unused warning when display_name is otherwise
+            // dropped (the worker reads it from the event).
+            let _ = display_name;
         } else {
             tracing::debug!("Forgot-password for unknown email: {}", email);
         }

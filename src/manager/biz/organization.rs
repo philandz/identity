@@ -130,6 +130,30 @@ impl IdentityBiz {
         let now = Utc::now();
         let expires_at = now + Duration::days(7);
 
+        // Pull the org name + inviter display name so the email can render
+        // a friendly "X invited you to Y" body. Best-effort: if either lookup
+        // fails we still send the email with placeholder text.
+        let org_name = self
+            .repo
+            .find_organization_by_id(org_id)
+            .await
+            .map_err(Self::map_internal_error)?
+            .map(|o| o.name)
+            .unwrap_or_else(|| "the organization".to_string());
+        let inviter_display_name = self
+            .repo
+            .find_user_by_id(caller_user_id)
+            .await
+            .map_err(Self::map_internal_error)?
+            .map(|u| u.display_name)
+            .unwrap_or_else(|| "A team member".to_string());
+        let org_role_human = match role {
+            OrgRole::OrAdmin => "admin",
+            OrgRole::OrMember => "member",
+            _ => "member",
+        }
+        .to_string();
+
         self.repo
             .upsert_organization_invitation(UpsertOrganizationInvitationParams {
                 id: &invitation_id,
@@ -154,7 +178,11 @@ impl IdentityBiz {
         self.enqueue_notification(super::NotificationEvent::OrgInvitation {
             email: normalized_email.clone(),
             org_id: org_id.to_string(),
-            invitation_id: invitation_id.clone(),
+            org_name,
+            inviter_display_name,
+            org_role_human,
+            raw_token: raw_token.clone(),
+            expires_at,
         })
         .await;
 

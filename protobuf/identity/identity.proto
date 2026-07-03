@@ -94,6 +94,25 @@ service IdentityService {
 
   // Internal — used by Budget service to resolve org membership during CheckRole fallback
   rpc GetOrgRole(GetOrgRoleRequest) returns (GetOrgRoleResponse) {}
+
+  // Logged-in password change (mandatory email OTP step)
+  rpc RequestPasswordChangeOtp(RequestPasswordChangeOtpRequest) returns (RequestPasswordChangeOtpResponse) {
+    option (google.api.http) = { post: "/password/request-otp" body: "*" };
+  }
+  rpc ConfirmPasswordChangeOtp(ConfirmPasswordChangeOtpRequest) returns (ConfirmPasswordChangeOtpResponse) {
+    option (google.api.http) = { post: "/password/confirm-otp" body: "*" };
+  }
+
+  // Super-admin platform settings (mail provider config)
+  rpc GetResendConfig(GetResendConfigRequest) returns (GetResendConfigResponse) {
+    option (google.api.http) = { get: "/settings/resend" };
+  }
+  rpc UpdateResendConfig(UpdateResendConfigRequest) returns (UpdateResendConfigResponse) {
+    option (google.api.http) = { patch: "/settings/resend" body: "*" };
+  }
+  rpc TestResendConfig(TestResendConfigRequest) returns (TestResendConfigResponse) {
+    option (google.api.http) = { post: "/settings/resend/test" body: "*" };
+  }
 }
 
 message RegisterRequest {

@@ -278,7 +278,7 @@ fn email_value(email: &str) -> Result<(), Status> {
     Ok(())
 }
 
-fn password_value(password: &str) -> Result<(), Status> {
+pub fn password_value(password: &str) -> Result<(), Status> {
     let len = password.len();
     if len < MIN_PASSWORD_LEN {
         return Err(Status::invalid_argument(
@@ -292,6 +292,61 @@ fn password_value(password: &str) -> Result<(), Status> {
         ));
     }
 
+    Ok(())
+}
+
+/// Public email validator — used by `test_resend_config` and other
+/// super-admin endpoints that need to validate an address that is not the
+/// login email of a user.
+pub fn email(email: &str) -> Result<(), Status> {
+    email_value(email)
+}
+
+pub fn password_change_request(current_password: &str, new_password: &str) -> Result<(), Status> {
+    change_password_input(current_password, new_password)
+}
+
+pub fn otp_code(code: &str) -> Result<(), Status> {
+    let trimmed = code.trim();
+    if trimmed.len() != 6 || !trimmed.chars().all(|c| c.is_ascii_digit()) {
+        return Err(Status::invalid_argument("OTP must be 6 digits"));
+    }
+    Ok(())
+}
+
+pub fn resend_api_key(key: &str) -> Result<(), Status> {
+    let trimmed = key.trim();
+    // Resend's API key prefix is "re_"; we accept a small prefix of letters
+    // so this works if Resend rotates the prefix.
+    if trimmed.len() < 20
+        || !trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(Status::invalid_argument(
+            "Resend API key must be at least 20 alphanumeric/underscore characters",
+        ));
+    }
+    Ok(())
+}
+
+pub fn resend_public_config(from_address: &str, reply_to: Option<&str>) -> Result<(), Status> {
+    let from = from_address.trim();
+    if from.is_empty() {
+        return Err(Status::invalid_argument("From address must not be empty"));
+    }
+    // Quick check: must contain an "@" and a domain-shaped part.
+    if !from.contains('@') || from.split('@').nth(1).is_none_or(str::is_empty) {
+        return Err(Status::invalid_argument(
+            "From address must be a valid email",
+        ));
+    }
+    if let Some(reply) = reply_to {
+        let reply_trimmed = reply.trim();
+        if !reply_trimmed.is_empty() && (!reply_trimmed.contains('@')) {
+            return Err(Status::invalid_argument("Reply-To must be a valid email"));
+        }
+    }
     Ok(())
 }
 

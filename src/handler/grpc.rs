@@ -11,6 +11,8 @@ use crate::pb::service::identity::{
     ChangeOrgMemberRoleResponse,
     ChangePasswordRequest,
     ChangePasswordResponse,
+    ConfirmPasswordChangeOtpRequest,
+    ConfirmPasswordChangeOtpResponse,
     CreateOrganizationAdminRequest,
     CreateOrganizationAdminResponse,
     CreateUserRequest,
@@ -27,6 +29,8 @@ use crate::pb::service::identity::{
     GetOrganizationAdminResponse,
     GetProfileRequest,
     GetProfileResponse,
+    GetResendConfigRequest,
+    GetResendConfigResponse,
     GetUserRequest,
     GetUserResponse,
     InviteMemberRequest,
@@ -50,12 +54,18 @@ use crate::pb::service::identity::{
     RegisterResponse,
     RemoveOrgMemberRequest,
     RemoveOrgMemberResponse,
+    RequestPasswordChangeOtpRequest,
+    RequestPasswordChangeOtpResponse,
     ResetPasswordRequest,
     ResetPasswordResponse,
+    TestResendConfigRequest,
+    TestResendConfigResponse,
     UpdateOrganizationAdminRequest,
     UpdateOrganizationAdminResponse,
     UpdateProfileRequest,
     UpdateProfileResponse,
+    UpdateResendConfigRequest,
+    UpdateResendConfigResponse,
     UpdateUserRequest,
     UpdateUserResponse,
 };
@@ -423,5 +433,76 @@ impl IdentityService for IdentityHandler {
         Ok(Response::new(GetOrgRoleResponse {
             role: org_role as i32,
         }))
+    }
+
+    // -- Logged-in password change (mandatory email OTP) -----------------
+
+    async fn request_password_change_otp(
+        &self,
+        request: Request<RequestPasswordChangeOtpRequest>,
+    ) -> Result<Response<RequestPasswordChangeOtpResponse>, Status> {
+        let token = extract_bearer_token(&request)?;
+        let claims = self.biz.verify_jwt(&token).await?;
+        let resp = self
+            .biz
+            .request_password_change_otp(&claims.sub, request.into_inner())
+            .await?;
+        Ok(Response::new(resp))
+    }
+
+    async fn confirm_password_change_otp(
+        &self,
+        request: Request<ConfirmPasswordChangeOtpRequest>,
+    ) -> Result<Response<ConfirmPasswordChangeOtpResponse>, Status> {
+        let token = extract_bearer_token(&request)?;
+        let claims = self.biz.verify_jwt(&token).await?;
+        let resp = self
+            .biz
+            .confirm_password_change_otp(&claims.sub, request.into_inner())
+            .await?;
+        Ok(Response::new(resp))
+    }
+
+    // -- Super-admin platform settings -----------------------------------
+
+    async fn get_resend_config(
+        &self,
+        request: Request<GetResendConfigRequest>,
+    ) -> Result<Response<GetResendConfigResponse>, Status> {
+        let _ = extract_bearer_token(&request)?;
+        let resp = self.biz.get_resend_config().await?;
+        Ok(Response::new(resp))
+    }
+
+    async fn update_resend_config(
+        &self,
+        request: Request<UpdateResendConfigRequest>,
+    ) -> Result<Response<UpdateResendConfigResponse>, Status> {
+        let token = extract_bearer_token(&request)?;
+        let claims = self.biz.verify_jwt(&token).await?;
+        let req = request.into_inner();
+        let reply_to = if req.reply_to.is_empty() {
+            None
+        } else {
+            Some(req.reply_to.as_str())
+        };
+        let resp = self
+            .biz
+            .update_resend_config(&claims.sub, Some(&req.api_key), &req.from_address, reply_to)
+            .await?;
+        Ok(Response::new(resp))
+    }
+
+    async fn test_resend_config(
+        &self,
+        request: Request<TestResendConfigRequest>,
+    ) -> Result<Response<TestResendConfigResponse>, Status> {
+        let token = extract_bearer_token(&request)?;
+        let claims = self.biz.verify_jwt(&token).await?;
+        let resp = self
+            .biz
+            .test_resend_config(&claims.sub, &request.into_inner().recipient_email)
+            .await?;
+        Ok(Response::new(resp))
     }
 }

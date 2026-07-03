@@ -48,7 +48,11 @@ impl IdentityBiz {
             .await
             .map_err(Self::map_internal_error)?;
 
-        tracing::debug!("init_super_admin: email={}, found={}", email, existing.is_some());
+        tracing::debug!(
+            "init_super_admin: email={}, found={}",
+            email,
+            existing.is_some()
+        );
 
         if existing.is_some() {
             tracing::info!(

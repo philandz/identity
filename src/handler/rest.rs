@@ -224,6 +224,84 @@ pub struct ResetPasswordResponse {
 }
 
 // ---------------------------------------------------------------------------
+// DTOs — Password change (logged-in, mandatory email OTP)
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, ToSchema)]
+pub struct RequestPasswordChangeOtpRequestRest {
+    /// Current password for verification.
+    pub current_password: String,
+    /// New password (min 8 characters) — applied only after OTP confirmation.
+    pub new_password: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct RequestPasswordChangeOtpResponseRest {
+    /// "OTP sent if the account matched."
+    pub message: String,
+    /// Seconds until the OTP expires (typically 600).
+    pub ttl_seconds: i32,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ConfirmPasswordChangeOtpRequestRest {
+    /// 6-digit code emailed to the user.
+    pub otp: String,
+    /// New password (must match the one submitted in step 1).
+    pub new_password: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ConfirmPasswordChangeOtpResponseRest {
+    pub message: String,
+}
+
+// ---------------------------------------------------------------------------
+// DTOs — Super Admin platform settings (mail provider)
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, ToSchema)]
+pub struct GetResendConfigResponseRest {
+    /// `true` if any source (DB or env) currently supplies a usable key.
+    pub configured: bool,
+    /// "db" | "env" | "none" — which source is in effect.
+    pub source: String,
+    /// Masked key like `***XXXX` (never the raw key).
+    pub masked_key: String,
+    /// The configured "From" address (public, not secret).
+    pub from_address: String,
+    /// Reply-To address (public, may be empty).
+    pub reply_to: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateResendConfigRequestRest {
+    /// Resend API key (min 20 chars, alphanumeric/underscore).
+    pub api_key: String,
+    /// Verified "From" address (e.g. "Philandz <noreply@philandz.com>").
+    pub from_address: String,
+    /// Optional Reply-To address.
+    pub reply_to: Option<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct UpdateResendConfigResponseRest {
+    pub current: GetResendConfigResponseRest,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct TestResendConfigRequestRest {
+    /// Recipient email for the one-off test message.
+    pub recipient_email: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct TestResendConfigResponseRest {
+    /// Resend's `id` for the dispatched message (proof of delivery).
+    pub message_id: String,
+}
+
+// ---------------------------------------------------------------------------
 // DTOs — Organization IAM (P1)
 // ---------------------------------------------------------------------------
 
@@ -912,6 +990,181 @@ async fn reset_password(
 
     Ok(Json(ResetPasswordResponse {
         message: "Password has been reset successfully".to_string(),
+    }))
+}
+
+/// Step 1 of the in-app password change — verify the current password,
+/// email a 6-digit code, return the TTL so the UI can show a countdown.
+#[utoipa::path(
+    post,
+    path = "/password/request-otp",
+    request_body = RequestPasswordChangeOtpRequestRest,
+    responses(
+        (status = 200, description = "OTP issued", body = RequestPasswordChangeOtpResponseRest),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Invalid current password", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "auth"
+)]
+async fn request_password_change_otp(
+    State(biz): State<HttpState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<RequestPasswordChangeOtpRequestRest>,
+) -> Result<Json<RequestPasswordChangeOtpResponseRest>, (StatusCode, Json<ErrorResponse>)> {
+    let user_id = extract_user_id_from_jwt(&biz, &headers).await?;
+
+    let proto_req = crate::pb::service::identity::RequestPasswordChangeOtpRequest {
+        current_password: body.current_password,
+        new_password: body.new_password,
+    };
+    let proto_resp = biz
+        .request_password_change_otp(&user_id, proto_req)
+        .await
+        .map_err(|e| map_status(&e))?;
+
+    Ok(Json(RequestPasswordChangeOtpResponseRest {
+        message: proto_resp.message,
+        ttl_seconds: proto_resp.ttl_seconds,
+    }))
+}
+
+/// Step 2 of the in-app password change — validate the OTP and apply the new
+/// password on success.
+#[utoipa::path(
+    post,
+    path = "/password/confirm-otp",
+    request_body = ConfirmPasswordChangeOtpRequestRest,
+    responses(
+        (status = 200, description = "Password updated", body = ConfirmPasswordChangeOtpResponseRest),
+        (status = 400, description = "Invalid or expired OTP", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "auth"
+)]
+async fn confirm_password_change_otp(
+    State(biz): State<HttpState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<ConfirmPasswordChangeOtpRequestRest>,
+) -> Result<Json<ConfirmPasswordChangeOtpResponseRest>, (StatusCode, Json<ErrorResponse>)> {
+    let user_id = extract_user_id_from_jwt(&biz, &headers).await?;
+
+    let proto_req = crate::pb::service::identity::ConfirmPasswordChangeOtpRequest {
+        otp: body.otp,
+        new_password: body.new_password,
+    };
+    biz.confirm_password_change_otp(&user_id, proto_req)
+        .await
+        .map_err(|e| map_status(&e))?;
+
+    Ok(Json(ConfirmPasswordChangeOtpResponseRest {
+        message: "Password updated. Please sign in again.".to_string(),
+    }))
+}
+
+/// Read the current Resend configuration (super-admin only).
+#[utoipa::path(
+    get,
+    path = "/settings/resend",
+    responses(
+        (status = 200, description = "Resend config", body = GetResendConfigResponseRest),
+        (status = 401, description = "Missing/invalid token", body = ErrorResponse),
+        (status = 403, description = "Super admin required", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "admin"
+)]
+async fn get_resend_config(
+    State(biz): State<HttpState>,
+    _headers: axum::http::HeaderMap,
+) -> Result<Json<GetResendConfigResponseRest>, (StatusCode, Json<ErrorResponse>)> {
+    let resp = biz.get_resend_config().await.map_err(|e| map_status(&e))?;
+    Ok(Json(GetResendConfigResponseRest {
+        configured: resp.configured,
+        source: resp.source,
+        masked_key: resp.masked_key,
+        from_address: resp.from_address,
+        reply_to: resp.reply_to,
+    }))
+}
+
+/// Persist a new Resend configuration (super-admin only). The API key is
+/// encrypted at rest and never returned through this or any other RPC.
+#[utoipa::path(
+    patch,
+    path = "/settings/resend",
+    request_body = UpdateResendConfigRequestRest,
+    responses(
+        (status = 200, description = "Config updated", body = UpdateResendConfigResponseRest),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 403, description = "Super admin required", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "admin"
+)]
+async fn update_resend_config(
+    State(biz): State<HttpState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<UpdateResendConfigRequestRest>,
+) -> Result<Json<UpdateResendConfigResponseRest>, (StatusCode, Json<ErrorResponse>)> {
+    let caller_user_id = extract_user_id_from_jwt(&biz, &headers).await?;
+    let reply_to_ref = body.reply_to.as_deref();
+    let resp = biz
+        .update_resend_config(
+            &caller_user_id,
+            Some(&body.api_key),
+            &body.from_address,
+            reply_to_ref,
+        )
+        .await
+        .map_err(|e| map_status(&e))?;
+
+    let current = resp
+        .current
+        .map(|c| GetResendConfigResponseRest {
+            configured: c.configured,
+            source: c.source,
+            masked_key: c.masked_key,
+            from_address: c.from_address,
+            reply_to: c.reply_to,
+        })
+        .unwrap_or_else(|| GetResendConfigResponseRest {
+            configured: false,
+            source: "none".to_string(),
+            masked_key: String::new(),
+            from_address: String::new(),
+            reply_to: String::new(),
+        });
+
+    Ok(Json(UpdateResendConfigResponseRest { current }))
+}
+
+/// Send a one-off test message via Resend (super-admin only). Useful for
+/// confirming SPF/DKIM setup before relying on the platform for real flows.
+#[utoipa::path(
+    post,
+    path = "/settings/resend/test",
+    request_body = TestResendConfigRequestRest,
+    responses(
+        (status = 200, description = "Test dispatched", body = TestResendConfigResponseRest),
+        (status = 400, description = "Invalid email or mailer not configured", body = ErrorResponse),
+        (status = 403, description = "Super admin required", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "admin"
+)]
+async fn test_resend_config(
+    State(biz): State<HttpState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<TestResendConfigRequestRest>,
+) -> Result<Json<TestResendConfigResponseRest>, (StatusCode, Json<ErrorResponse>)> {
+    let caller_user_id = extract_user_id_from_jwt(&biz, &headers).await?;
+    let resp = biz
+        .test_resend_config(&caller_user_id, &body.recipient_email)
+        .await
+        .map_err(|e| map_status(&e))?;
+    Ok(Json(TestResendConfigResponseRest {
+        message_id: resp.message_id,
     }))
 }
 
@@ -1744,4 +1997,13 @@ pub fn router() -> Router<HttpState> {
             "/organizations/{org_id}",
             patch(update_organization_admin).delete(delete_organization_admin),
         )
+        // Logged-in password change (mandatory email OTP step)
+        .route("/password/request-otp", post(request_password_change_otp))
+        .route("/password/confirm-otp", post(confirm_password_change_otp))
+        // Super-admin platform settings (mail provider)
+        .route(
+            "/settings/resend",
+            get(get_resend_config).patch(update_resend_config),
+        )
+        .route("/settings/resend/test", post(test_resend_config))
 }

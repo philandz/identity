@@ -15,6 +15,14 @@ pub struct IdentityRepository {
     pool: std::sync::Arc<sqlx::Pool<sqlx::MySql>>,
 }
 
+impl Clone for IdentityRepository {
+    fn clone(&self) -> Self {
+        // Re-derive the inner `Repo` from the shared pool. The pool is the
+        // only piece of real state — the inner wrapper is stateless.
+        Self::from_pool(self.pool.clone())
+    }
+}
+
 /// Parameters for paginated list queries.
 #[derive(Debug, Default)]
 pub struct ListQuery {
@@ -52,6 +60,33 @@ pub struct OrganizationInvitationRow {
     pub status: InvitationStatus,
     pub expires_at: i64,
     pub created_at: i64,
+}
+
+/// One row of `platform_settings` (encrypted secret). The caller is
+/// responsible for encryption/decryption — we just persist opaque bytes.
+pub struct PlatformSettingRow {
+    pub key: String,
+    pub value_ciphertext: String,
+    pub updated_by: Option<String>,
+}
+
+/// One row of `platform_settings_public` (non-secret JSON config).
+pub struct PlatformSettingPublicRow {
+    pub key: String,
+    pub value_json: serde_json::Value,
+    pub updated_by: Option<String>,
+}
+
+/// One row of `password_change_otps`.
+pub struct PasswordChangeOtpRow {
+    pub id: String,
+    pub user_id: String,
+    pub otp_hash: String,
+    pub expires_at: DateTime<Utc>,
+    pub attempts: u8,
+    pub max_attempts: u8,
+    pub used_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
 }
 
 pub struct UpsertOrganizationInvitationParams<'a> {
@@ -1095,6 +1130,216 @@ impl IdentityRepository {
         .await?;
 
         Ok(result.rows_affected())
+    }
+
+    // -----------------------------------------------------------------------
+    // Platform settings (encrypted secrets + non-secret JSON config)
+    // -----------------------------------------------------------------------
+
+    pub async fn upsert_platform_setting(
+        &self,
+        key: &str,
+        value_ciphertext: &str,
+        updated_by: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let table = table_name(philand_table::table::PLATFORM_SETTINGS);
+        sqlx::query(&format!(
+            "INSERT INTO {table} (`key`, value_ciphertext, updated_by) VALUES (?, ?, ?) \
+             ON DUPLICATE KEY UPDATE value_ciphertext = VALUES(value_ciphertext), updated_by = VALUES(updated_by)"
+        ))
+        .bind(key)
+        .bind(value_ciphertext)
+        .bind(updated_by)
+        .execute(&*self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn get_platform_setting(
+        &self,
+        key: &str,
+    ) -> Result<Option<PlatformSettingRow>, sqlx::Error> {
+        let table = table_name(philand_table::table::PLATFORM_SETTINGS);
+        let row: Option<(String, String, Option<String>)> = sqlx::query_as(&format!(
+            "SELECT `key`, value_ciphertext, updated_by FROM {table} WHERE `key` = ?"
+        ))
+        .bind(key)
+        .fetch_optional(&*self.pool)
+        .await?;
+        Ok(
+            row.map(|(key, value_ciphertext, updated_by)| PlatformSettingRow {
+                key,
+                value_ciphertext,
+                updated_by,
+            }),
+        )
+    }
+
+    pub async fn delete_platform_setting(&self, key: &str) -> Result<u64, sqlx::Error> {
+        let table = table_name(philand_table::table::PLATFORM_SETTINGS);
+        let res = sqlx::query(&format!("DELETE FROM {table} WHERE `key` = ?"))
+            .bind(key)
+            .execute(&*self.pool)
+            .await?;
+        Ok(res.rows_affected())
+    }
+
+    pub async fn upsert_platform_setting_public(
+        &self,
+        key: &str,
+        value_json: &serde_json::Value,
+        updated_by: Option<&str>,
+    ) -> Result<(), sqlx::Error> {
+        let table = table_name(philand_table::table::PLATFORM_SETTINGS_PUBLIC);
+        let value_str =
+            serde_json::to_string(value_json).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+        sqlx::query(&format!(
+            "INSERT INTO {table} (`key`, value_json, updated_by) VALUES (?, ?, ?) \
+             ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_by = VALUES(updated_by)"
+        ))
+        .bind(key)
+        .bind(value_str)
+        .bind(updated_by)
+        .execute(&*self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn get_platform_setting_public(
+        &self,
+        key: &str,
+    ) -> Result<Option<PlatformSettingPublicRow>, sqlx::Error> {
+        let table = table_name(philand_table::table::PLATFORM_SETTINGS_PUBLIC);
+        let row: Option<(String, String, Option<String>)> = sqlx::query_as(&format!(
+            "SELECT `key`, value_json, updated_by FROM {table} WHERE `key` = ?"
+        ))
+        .bind(key)
+        .fetch_optional(&*self.pool)
+        .await?;
+        let Some((key, value_str, updated_by)) = row else {
+            return Ok(None);
+        };
+        let value_json: serde_json::Value =
+            serde_json::from_str(&value_str).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
+        Ok(Some(PlatformSettingPublicRow {
+            key,
+            value_json,
+            updated_by,
+        }))
+    }
+
+    // -----------------------------------------------------------------------
+    // Password-change OTPs
+    // -----------------------------------------------------------------------
+
+    pub async fn insert_password_change_otp(
+        &self,
+        id: &str,
+        user_id: &str,
+        otp_hash: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<(), sqlx::Error> {
+        let table = table_name(philand_table::table::PASSWORD_CHANGE_OTPS);
+        sqlx::query(&format!(
+            "INSERT INTO {table} (id, user_id, otp_hash, expires_at) VALUES (?, ?, ?, ?)"
+        ))
+        .bind(id)
+        .bind(user_id)
+        .bind(otp_hash)
+        .bind(fmt_db_time(expires_at))
+        .execute(&*self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    /// Returns the latest active (unused + unexpired) OTP for the user, or
+    /// `None` if no active row exists.
+    pub async fn find_active_password_change_otp(
+        &self,
+        user_id: &str,
+    ) -> Result<Option<PasswordChangeOtpRow>, sqlx::Error> {
+        type OtpRow = (
+            String,
+            String,
+            String,
+            chrono::DateTime<chrono::Utc>,
+            u8,
+            u8,
+            Option<chrono::DateTime<chrono::Utc>>,
+            chrono::DateTime<chrono::Utc>,
+        );
+        let table = table_name(philand_table::table::PASSWORD_CHANGE_OTPS);
+        let row: Option<OtpRow> = sqlx::query_as(&format!(
+            "SELECT id, user_id, otp_hash, expires_at, attempts, max_attempts, used_at, created_at \
+             FROM {table} \
+             WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW() \
+             ORDER BY created_at DESC LIMIT 1"
+        ))
+        .bind(user_id)
+        .fetch_optional(&*self.pool)
+        .await?;
+        Ok(row.map(
+            |(id, user_id, otp_hash, expires_at, attempts, max_attempts, used_at, created_at)| {
+                PasswordChangeOtpRow {
+                    id,
+                    user_id,
+                    otp_hash,
+                    expires_at,
+                    attempts,
+                    max_attempts,
+                    used_at,
+                    created_at,
+                }
+            },
+        ))
+    }
+
+    pub async fn increment_otp_attempts(&self, id: &str) -> Result<u8, sqlx::Error> {
+        let table = table_name(philand_table::table::PASSWORD_CHANGE_OTPS);
+        let result = sqlx::query(&format!(
+            "UPDATE {table} SET attempts = attempts + 1 WHERE id = ?"
+        ))
+        .bind(id)
+        .execute(&*self.pool)
+        .await?;
+        let count = result.rows_affected();
+        if count == 0 {
+            return Err(sqlx::Error::RowNotFound);
+        }
+        let row: (u8,) = sqlx::query_as(&format!("SELECT attempts FROM {table} WHERE id = ?"))
+            .bind(id)
+            .fetch_one(&*self.pool)
+            .await?;
+        Ok(row.0)
+    }
+
+    pub async fn mark_password_change_otp_used(&self, id: &str) -> Result<(), sqlx::Error> {
+        let table = table_name(philand_table::table::PASSWORD_CHANGE_OTPS);
+        sqlx::query(&format!(
+            "UPDATE {table} SET used_at = ? WHERE id = ? AND used_at IS NULL"
+        ))
+        .bind(fmt_db_time(Utc::now()))
+        .bind(id)
+        .execute(&*self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    /// Invalidate any pending OTPs for the user. Called before issuing a new
+    /// one so only one active OTP exists per user at any time.
+    pub async fn invalidate_pending_otps_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<u64, sqlx::Error> {
+        let table = table_name(philand_table::table::PASSWORD_CHANGE_OTPS);
+        let res = sqlx::query(&format!(
+            "UPDATE {table} SET used_at = ? WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW()"
+        ))
+        .bind(fmt_db_time(Utc::now()))
+        .bind(user_id)
+        .execute(&*self.pool)
+        .await?;
+        Ok(res.rows_affected())
     }
 
     /// Hard-delete a user row (admin only — caller must have already checked guards).
