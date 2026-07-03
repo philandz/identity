@@ -350,6 +350,51 @@ pub fn resend_public_config(from_address: &str, reply_to: Option<&str>) -> Resul
     Ok(())
 }
 
+/// Validate the Super Admin → System Config payload. All 4 fields are
+/// required; URL must start with http(s):// and emails must contain `@`.
+pub fn system_config(
+    app_public_base_url: &str,
+    support_email: &str,
+    default_locale: &str,
+    mail_from_address: &str,
+) -> Result<(), Status> {
+    let url = app_public_base_url.trim();
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err(Status::invalid_argument(
+            "App public URL must start with http:// or https://",
+        ));
+    }
+    if url.contains(' ') || url.len() > 1024 {
+        return Err(Status::invalid_argument("App public URL is invalid"));
+    }
+
+    let support = support_email.trim();
+    if !support.contains('@') || support.split('@').nth(1).is_none_or(str::is_empty) {
+        return Err(Status::invalid_argument(
+            "Support email must be a valid email",
+        ));
+    }
+
+    let locale = default_locale.trim().to_lowercase();
+    if locale.is_empty()
+        || locale.len() > 10
+        || !locale
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err(Status::invalid_argument(
+            "Default locale must be 1-10 chars (letters, digits, dash)",
+        ));
+    }
+
+    let mail_from = mail_from_address.trim();
+    if mail_from.is_empty() || !mail_from.contains('@') {
+        return Err(Status::invalid_argument("From address must be a valid email"));
+    }
+
+    Ok(())
+}
+
 fn display_name_value(display_name: &str) -> Result<(), Status> {
     let trimmed = display_name.trim();
     if philand_validator::non_empty("display_name", trimmed).is_err() {

@@ -301,6 +301,31 @@ pub struct TestResendConfigResponseRest {
     pub message_id: String,
 }
 
+#[derive(Serialize, ToSchema)]
+pub struct GetSystemConfigResponseRest {
+    pub app_public_base_url: String,
+    pub support_email: String,
+    pub default_locale: String,
+    pub mail_from_address: String,
+    pub source_app_public_base_url: String,
+    pub source_support_email: String,
+    pub source_default_locale: String,
+    pub source_mail_from_address: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateSystemConfigRequestRest {
+    pub app_public_base_url: String,
+    pub support_email: String,
+    pub default_locale: String,
+    pub mail_from_address: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct UpdateSystemConfigResponseRest {
+    pub current: GetSystemConfigResponseRest,
+}
+
 // ---------------------------------------------------------------------------
 // DTOs — Organization IAM (P1)
 // ---------------------------------------------------------------------------
@@ -1168,6 +1193,92 @@ async fn test_resend_config(
     }))
 }
 
+/// Read the system environment config (URLs, support email, locale, From).
+/// Each field reports its source ("db" / "env" / "default") so the admin
+/// knows what's stored in the DB vs. env.
+#[utoipa::path(
+    get,
+    path = "/settings/system",
+    responses(
+        (status = 200, description = "System config", body = GetSystemConfigResponseRest),
+        (status = 401, description = "Missing/invalid token", body = ErrorResponse),
+        (status = 403, description = "Super admin required", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "admin"
+)]
+async fn get_system_config(
+    State(biz): State<HttpState>,
+    _headers: axum::http::HeaderMap,
+) -> Result<Json<GetSystemConfigResponseRest>, (StatusCode, Json<ErrorResponse>)> {
+    let resp = biz.get_system_config().await.map_err(|e| map_status(&e))?;
+    Ok(Json(GetSystemConfigResponseRest {
+        app_public_base_url: resp.app_public_base_url,
+        support_email: resp.support_email,
+        default_locale: resp.default_locale,
+        mail_from_address: resp.mail_from_address,
+        source_app_public_base_url: resp.source_app_public_base_url,
+        source_support_email: resp.source_support_email,
+        source_default_locale: resp.source_default_locale,
+        source_mail_from_address: resp.source_mail_from_address,
+    }))
+}
+
+/// Persist a new system environment config (super-admin only). No service
+/// restart needed — values are picked up by the next email sent.
+#[utoipa::path(
+    patch,
+    path = "/settings/system",
+    request_body = UpdateSystemConfigRequestRest,
+    responses(
+        (status = 200, description = "Config updated", body = UpdateSystemConfigResponseRest),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 403, description = "Super admin required", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "admin"
+)]
+async fn update_system_config(
+    State(biz): State<HttpState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<UpdateSystemConfigRequestRest>,
+) -> Result<Json<UpdateSystemConfigResponseRest>, (StatusCode, Json<ErrorResponse>)> {
+    let caller_user_id = extract_user_id_from_jwt(&biz, &headers).await?;
+    let resp = biz
+        .update_system_config(
+            &caller_user_id,
+            body.app_public_base_url,
+            body.support_email,
+            body.default_locale,
+            body.mail_from_address,
+        )
+        .await
+        .map_err(|e| map_status(&e))?;
+    let current = resp
+        .current
+        .map(|c| GetSystemConfigResponseRest {
+            app_public_base_url: c.app_public_base_url,
+            support_email: c.support_email,
+            default_locale: c.default_locale,
+            mail_from_address: c.mail_from_address,
+            source_app_public_base_url: c.source_app_public_base_url,
+            source_support_email: c.source_support_email,
+            source_default_locale: c.source_default_locale,
+            source_mail_from_address: c.source_mail_from_address,
+        })
+        .unwrap_or_else(|| GetSystemConfigResponseRest {
+            app_public_base_url: String::new(),
+            support_email: String::new(),
+            default_locale: String::new(),
+            mail_from_address: String::new(),
+            source_app_public_base_url: "default".to_string(),
+            source_support_email: "default".to_string(),
+            source_default_locale: "default".to_string(),
+            source_mail_from_address: "default".to_string(),
+        });
+    Ok(Json(UpdateSystemConfigResponseRest { current }))
+}
+
 /// List all members of an organization.
 #[utoipa::path(
     get,
@@ -2006,4 +2117,9 @@ pub fn router() -> Router<HttpState> {
             get(get_resend_config).patch(update_resend_config),
         )
         .route("/settings/resend/test", post(test_resend_config))
+        // Super-admin platform settings (system environment)
+        .route(
+            "/settings/system",
+            get(get_system_config).patch(update_system_config),
+        )
 }

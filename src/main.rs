@@ -84,6 +84,22 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(philand_notify::ResendMailer::new(source))
     };
 
+    let biz = Arc::new(IdentityBiz::new(
+        repo.clone(),
+        config.clone(),
+        if notify_enabled {
+            Some(notify_tx)
+        } else {
+            None
+        },
+        mailer.clone(),
+    ));
+
+    // Overlay the DB-stored system config on top of env so the notify
+    // worker uses the URLs/locale/From the super admin may have
+    // overridden via /admin/settings without a service restart.
+    biz.apply_db_system_config_at_startup().await;
+
     if notify_enabled {
         let telegram_enabled = philand_env::bool_flag("NOTIFY_TELEGRAM_ENABLED", false);
         let bot_token = std::env::var("NOTIFY_TELEGRAM_BOT_TOKEN").ok();
@@ -91,23 +107,12 @@ async fn main() -> anyhow::Result<()> {
         spawn_notify_worker(
             notify_rx,
             mailer.clone(),
-            config.clone(),
+            biz.clone(),
             telegram_enabled,
             bot_token,
             chat_id,
         );
     }
-
-    let biz = Arc::new(IdentityBiz::new(
-        repo,
-        config.clone(),
-        if notify_enabled {
-            Some(notify_tx)
-        } else {
-            None
-        },
-        mailer,
-    ));
 
     // Seed the initial super-admin user (idempotent — skips if already exists)
     if let Err(e) = biz.init_super_admin().await {
@@ -194,7 +199,7 @@ async fn main() -> anyhow::Result<()> {
 fn spawn_notify_worker(
     mut rx: philand_queue::QueueReceiver<NotificationEvent>,
     mailer: Arc<dyn philand_notify::Mailer>,
-    config: philand_configs::IdentityServiceConfig,
+    biz: Arc<identity::manager::biz::IdentityBiz>,
     telegram_enabled: bool,
     bot_token: Option<String>,
     chat_id: Option<String>,
@@ -244,7 +249,7 @@ fn spawn_notify_worker(
             // Email fanout — renders the appropriate template and sends via
             // the mailer. Failures are logged and never block subsequent
             // events.
-            let rendered = render_event_to_mail(&event, &config);
+            let rendered = render_event_to_mail(&event, &biz).await;
             let outcome = match rendered {
                 Some(msg) => match mailer.send(msg).await {
                     Ok(receipt) => {
@@ -272,17 +277,18 @@ fn spawn_notify_worker(
 }
 
 /// Render a [`NotificationEvent`] into a [`philand_notify::MailMessage`].
-/// Returns `None` when the event cannot be rendered (e.g. missing required
-/// fields); callers log and continue.
-fn render_event_to_mail(
+/// Reads the live config each call so updates from the Super Admin → System
+/// Config page take effect on the next email without a restart.
+async fn render_event_to_mail(
     event: &NotificationEvent,
-    config: &philand_configs::IdentityServiceConfig,
+    biz: &Arc<identity::manager::biz::IdentityBiz>,
 ) -> Option<philand_notify::MailMessage> {
-    let from = config.mail_from_address.clone();
-    let reply_to = if config.support_email.is_empty() {
+    let live = biz.live_config_snapshot().await;
+    let from = live.mail_from_address.clone();
+    let reply_to = if live.support_email.is_empty() {
         None
     } else {
-        Some(config.support_email.clone())
+        Some(live.support_email.clone())
     };
 
     match event {
@@ -293,8 +299,8 @@ fn render_event_to_mail(
         } => {
             let reset_url = format!(
                 "{}/{}/reset-password?token={}",
-                config.app_public_base_url.trim_end_matches('/'),
-                config.default_locale,
+                live.app_public_base_url.trim_end_matches('/'),
+                live.default_locale,
                 raw_token
             );
             let rendered =
@@ -303,7 +309,7 @@ fn render_event_to_mail(
                     reset_url: &reset_url,
                     ttl_human: "1 hour",
                     expires_at: *expires_at,
-                    support_email: &config.support_email,
+                    support_email: &live.support_email,
                 });
             Some(rendered.into_mail(email.clone(), from, reply_to))
         }
@@ -318,8 +324,8 @@ fn render_event_to_mail(
         } => {
             let accept_url = format!(
                 "{}/{}/accept-invitation?token={}",
-                config.app_public_base_url.trim_end_matches('/'),
-                config.default_locale,
+                live.app_public_base_url.trim_end_matches('/'),
+                live.default_locale,
                 raw_token
             );
             let rendered =
@@ -331,7 +337,7 @@ fn render_event_to_mail(
                     accept_url: &accept_url,
                     ttl_human: "7 days",
                     expires_at: *expires_at,
-                    support_email: &config.support_email,
+                    support_email: &live.support_email,
                 });
             Some(rendered.into_mail(email.clone(), from, reply_to))
         }
@@ -347,7 +353,7 @@ fn render_event_to_mail(
                     code,
                     ttl_human: "10 minutes",
                     expires_at: *expires_at,
-                    support_email: &config.support_email,
+                    support_email: &live.support_email,
                 });
             Some(rendered.into_mail(email.clone(), from, reply_to))
         }

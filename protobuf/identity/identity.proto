@@ -113,6 +113,14 @@ service IdentityService {
   rpc TestResendConfig(TestResendConfigRequest) returns (TestResendConfigResponse) {
     option (google.api.http) = { post: "/settings/resend/test" body: "*" };
   }
+
+  // Super-admin platform settings (system environment & URLs)
+  rpc GetSystemConfig(GetSystemConfigRequest) returns (GetSystemConfigResponse) {
+    option (google.api.http) = { get: "/settings/system" };
+  }
+  rpc UpdateSystemConfig(UpdateSystemConfigRequest) returns (UpdateSystemConfigResponse) {
+    option (google.api.http) = { patch: "/settings/system" body: "*" };
+  }
 }
 
 message RegisterRequest {
@@ -387,6 +395,34 @@ message DeleteOrganizationAdminRequest {
 }
 
 message DeleteOrganizationAdminResponse {}
+
+// ---------------------------------------------------------------------------
+// Super-admin platform settings — system environment & URLs
+// ---------------------------------------------------------------------------
+
+message GetSystemConfigRequest {}
+
+message GetSystemConfigResponse {
+  string app_public_base_url        = 1;
+  string support_email              = 2;
+  string default_locale             = 3;
+  string mail_from_address          = 4;
+  string source_app_public_base_url = 5;
+  string source_support_email       = 6;
+  string source_default_locale      = 7;
+  string source_mail_from_address   = 8;
+}
+
+message UpdateSystemConfigRequest {
+  string app_public_base_url = 1;
+  string support_email       = 2;
+  string default_locale      = 3;
+  string mail_from_address   = 4;
+}
+
+message UpdateSystemConfigResponse {
+  GetSystemConfigResponse current = 1;
+}
 
 // ---------------------------------------------------------------------------
 // Internal RPCs

@@ -50,9 +50,26 @@ pub enum NotificationEvent {
     },
 }
 
+/// The 4 fields that the Super Admin → System Config page can edit live
+/// (without a service restart). All other config stays env-only and is
+/// read once at startup.
+#[derive(Debug, Clone, Default)]
+pub struct LiveConfig {
+    pub app_public_base_url: String,
+    pub support_email: String,
+    pub default_locale: String,
+    pub mail_from_address: String,
+}
+
 pub struct IdentityBiz {
     repo: IdentityRepository,
+    /// Read-only at runtime — contains jwt_secret, master_key, db url, etc.
+    /// Must NOT change after startup (rotating would invalidate every issued
+    /// JWT or require a full ciphertext re-encrypt pass).
     config: philand_configs::IdentityServiceConfig,
+    /// Live-reloadable overlay — Super Admin → System Config writes here and
+    /// every subsequent read picks up the new value without a service restart.
+    live_config: Arc<tokio::sync::RwLock<LiveConfig>>,
     notify_queue: Option<philand_queue::QueueSender<NotificationEvent>>,
     /// Provider-agnostic mailer. Held as an `Arc<dyn Mailer>` so the notify
     /// worker can be given the same handle without an extra Arc.
@@ -66,9 +83,17 @@ impl IdentityBiz {
         notify_queue: Option<philand_queue::QueueSender<NotificationEvent>>,
         mailer: Arc<dyn philand_notify::Mailer>,
     ) -> Self {
+        // Seed the live overlay with the env values from the static config.
+        let live = LiveConfig {
+            app_public_base_url: config.app_public_base_url.clone(),
+            support_email: config.support_email.clone(),
+            default_locale: config.default_locale.clone(),
+            mail_from_address: config.mail_from_address.clone(),
+        };
         Self {
             repo,
             config,
+            live_config: Arc::new(tokio::sync::RwLock::new(live)),
             notify_queue,
             mailer,
         }
@@ -76,6 +101,12 @@ impl IdentityBiz {
 
     fn map_internal_error(error: impl ToString) -> Status {
         Status::internal(error.to_string())
+    }
+
+    /// Snapshot of the live config (URLs, support email, locale, From).
+    /// Cheap: clone of a small struct under a read lock.
+    pub async fn live_config_snapshot(&self) -> LiveConfig {
+        self.live_config.read().await.clone()
     }
 
     async fn enqueue_notification(&self, event: NotificationEvent) {

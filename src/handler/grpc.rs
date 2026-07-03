@@ -13,6 +13,8 @@ use crate::pb::service::identity::{
     ChangePasswordResponse,
     ConfirmPasswordChangeOtpRequest,
     ConfirmPasswordChangeOtpResponse,
+    GetSystemConfigRequest,
+    GetSystemConfigResponse,
     CreateOrganizationAdminRequest,
     CreateOrganizationAdminResponse,
     CreateUserRequest,
@@ -66,6 +68,8 @@ use crate::pb::service::identity::{
     UpdateProfileResponse,
     UpdateResendConfigRequest,
     UpdateResendConfigResponse,
+    UpdateSystemConfigRequest,
+    UpdateSystemConfigResponse,
     UpdateUserRequest,
     UpdateUserResponse,
 };
@@ -502,6 +506,36 @@ impl IdentityService for IdentityHandler {
         let resp = self
             .biz
             .test_resend_config(&claims.sub, &request.into_inner().recipient_email)
+            .await?;
+        Ok(Response::new(resp))
+    }
+
+    // -- Super-admin system configuration -------------------------------
+
+    async fn get_system_config(
+        &self,
+        request: Request<GetSystemConfigRequest>,
+    ) -> Result<Response<GetSystemConfigResponse>, Status> {
+        let _ = extract_bearer_token(&request)?;
+        Ok(Response::new(self.biz.get_system_config().await?))
+    }
+
+    async fn update_system_config(
+        &self,
+        request: Request<UpdateSystemConfigRequest>,
+    ) -> Result<Response<UpdateSystemConfigResponse>, Status> {
+        let token = extract_bearer_token(&request)?;
+        let claims = self.biz.verify_jwt(&token).await?;
+        let req = request.into_inner();
+        let resp = self
+            .biz
+            .update_system_config(
+                &claims.sub,
+                req.app_public_base_url,
+                req.support_email,
+                req.default_locale,
+                req.mail_from_address,
+            )
             .await?;
         Ok(Response::new(resp))
     }
