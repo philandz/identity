@@ -1210,20 +1210,22 @@ impl IdentityRepository {
         key: &str,
     ) -> Result<Option<PlatformSettingPublicRow>, sqlx::Error> {
         let table = table_name(philand_table::table::PLATFORM_SETTINGS_PUBLIC);
-        let row: Option<(String, String, Option<String>)> = sqlx::query_as(&format!(
-            "SELECT `key`, value_json, updated_by FROM {table} WHERE `key` = ?"
-        ))
-        .bind(key)
-        .fetch_optional(&*self.pool)
-        .await?;
-        let Some((key, value_str, updated_by)) = row else {
+        // MySQL JSON columns need sqlx::types::Json to decode; binding to a
+        // bare String fails with "Rust type String is not compatible with
+        // SQL type JSON".
+        let row: Option<(String, sqlx::types::Json<serde_json::Value>, Option<String>)> =
+            sqlx::query_as(&format!(
+                "SELECT `key`, value_json, updated_by FROM {table} WHERE `key` = ?"
+            ))
+            .bind(key)
+            .fetch_optional(&*self.pool)
+            .await?;
+        let Some((key, value_json, updated_by)) = row else {
             return Ok(None);
         };
-        let value_json: serde_json::Value =
-            serde_json::from_str(&value_str).map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
         Ok(Some(PlatformSettingPublicRow {
             key,
-            value_json,
+            value_json: value_json.0,
             updated_by,
         }))
     }
