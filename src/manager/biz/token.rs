@@ -7,13 +7,23 @@ use crate::converters::DbUser;
 
 use super::IdentityBiz;
 
-/// JWT claims per Philand spec: sub (user ID), email, org_id, exp.
+/// JWT claims per Philand spec: sub (user ID), email, org_id, user_type, exp.
 /// See infra/.ai/skills/02-backend-rust/jwt-and-org.md
+///
+/// `user_type` carries the account kind (`"normal"` or `"super_admin"`) so the
+/// gateway can forward it to downstream services via the `x-user-type`
+/// metadata header. Without it, super admin tokens can't bypass per-org
+/// membership checks at the budget service (see
+/// `budget/src/manager/biz/mod.rs` `resolve_role`).
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
     pub email: String,
     pub org_id: String,
+    /// `"normal"` or `"super_admin"`. `#[serde(default)]` keeps verify_jwt
+    /// backward-compatible with pre-user_type tokens (returns empty string).
+    #[serde(default)]
+    pub user_type: String,
     pub exp: usize,
 }
 
@@ -34,6 +44,7 @@ impl IdentityBiz {
             sub: db_user.id.clone(),
             email: db_user.email.clone(),
             org_id: org_id.to_owned(),
+            user_type: db_user.user_type.clone(),
             exp: (Utc::now() + Duration::hours(24)).timestamp() as usize,
         };
 
