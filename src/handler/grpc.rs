@@ -13,8 +13,6 @@ use crate::pb::service::identity::{
     ChangePasswordResponse,
     ConfirmPasswordChangeOtpRequest,
     ConfirmPasswordChangeOtpResponse,
-    GetSystemConfigRequest,
-    GetSystemConfigResponse,
     CreateOrganizationAdminRequest,
     CreateOrganizationAdminResponse,
     CreateUserRequest,
@@ -33,6 +31,8 @@ use crate::pb::service::identity::{
     GetProfileResponse,
     GetResendConfigRequest,
     GetResendConfigResponse,
+    GetSystemConfigRequest,
+    GetSystemConfigResponse,
     GetUserRequest,
     GetUserResponse,
     InviteMemberRequest,
@@ -74,7 +74,7 @@ use crate::pb::service::identity::{
     UpdateUserResponse,
 };
 
-use super::metadata::extract_bearer_token;
+use super::metadata::{extract_bearer_token, user_id_from_metadata};
 
 pub struct IdentityHandler {
     biz: Arc<IdentityBiz>,
@@ -221,6 +221,25 @@ impl IdentityService for IdentityHandler {
         &self,
         request: Request<ListOrgMembersRequest>,
     ) -> Result<Response<ListOrgMembersResponse>, Status> {
+        let service_actor = request
+            .metadata()
+            .get("x-service-actor")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s == "true")
+            .unwrap_or(false);
+        if service_actor {
+            let caller_id = user_id_from_metadata(request.metadata())?;
+            self.biz
+                .require_permission(
+                    &caller_id,
+                    crate::manager::biz::authz::Permission::ManageAnyOrganization,
+                )
+                .await?;
+            let req = request.into_inner();
+            // super-admin with service-actor: skip org-membership check, go straight to repo
+            let members = self.biz.list_org_members_no_auth(&req.org_id).await?;
+            return Ok(Response::new(members));
+        }
         let token = extract_bearer_token(&request)?;
         let claims = self.biz.verify_jwt(&token).await?;
         let req = request.into_inner();
