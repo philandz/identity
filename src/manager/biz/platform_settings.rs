@@ -161,8 +161,11 @@ impl IdentityBiz {
         from_address: &str,
         reply_to: Option<&str>,
     ) -> Result<UpdateResendConfigResponse, Status> {
-        self.require_permission(caller_user_id, crate::manager::biz::authz::Permission::ManageAnyUser)
-            .await?;
+        self.require_permission(
+            caller_user_id,
+            crate::manager::biz::authz::Permission::ManageAnyUser,
+        )
+        .await?;
 
         validate::resend_public_config(from_address, reply_to)?;
         if let Some(k) = api_key {
@@ -193,7 +196,9 @@ impl IdentityBiz {
         let enabled = api_key.is_some() || !existing.from_address.is_empty();
         let next = MailPublicConfig {
             from_address: from_address.trim().to_string(),
-            reply_to: reply_to.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+            reply_to: reply_to
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
             enabled,
         };
         self.repo
@@ -248,8 +253,11 @@ impl IdentityBiz {
         caller_user_id: &str,
         recipient_email: &str,
     ) -> Result<TestResendConfigResponse, Status> {
-        self.require_permission(caller_user_id, crate::manager::biz::authz::Permission::ManageAnyUser)
-            .await?;
+        self.require_permission(
+            caller_user_id,
+            crate::manager::biz::authz::Permission::ManageAnyUser,
+        )
+        .await?;
         validate::email(recipient_email)?;
 
         let cfg = self.get_mail_public_config().await?;
@@ -264,15 +272,14 @@ impl IdentityBiz {
             .clone()
             .or_else(|| Some(live.support_email.clone()));
 
-        let rendered = philand_notify::render_password_change_otp(
-            philand_notify::PasswordChangeOtpVars {
+        let rendered =
+            philand_notify::render_password_change_otp(philand_notify::PasswordChangeOtpVars {
                 display_name: None,
                 code: "000000",
                 ttl_human: "10 minutes",
                 expires_at: chrono::Utc::now() + chrono::Duration::minutes(10),
                 support_email: &live.support_email,
-            },
-        );
+            });
         let msg = rendered.into_mail(recipient_email.to_string(), from, reply_to);
         let receipt = self
             .mailer
@@ -342,8 +349,11 @@ impl IdentityBiz {
         default_locale: String,
         mail_from_address: String,
     ) -> Result<UpdateSystemConfigResponse, Status> {
-        self.require_permission(caller_user_id, crate::manager::biz::authz::Permission::ManageAnyUser)
-            .await?;
+        self.require_permission(
+            caller_user_id,
+            crate::manager::biz::authz::Permission::ManageAnyUser,
+        )
+        .await?;
         validate::system_config(
             &app_public_base_url,
             &support_email,
@@ -446,9 +456,7 @@ impl IdentityBiz {
 /// of the Resend API key from the Super Admin → Global Settings page is
 /// observed without a service restart. Captures the placeholder `IdentityBiz`
 /// by `Arc` so the fetcher can call into `biz.resolve_resend_api_key().await`.
-pub fn build_api_key_source(
-    biz: Arc<IdentityBiz>,
-) -> philand_notify::ApiKeySource {
+pub fn build_api_key_source(biz: Arc<IdentityBiz>) -> philand_notify::ApiKeySource {
     let fetcher: philand_notify::AsyncKeyFetcher = std::sync::Arc::new(move || {
         let biz = biz.clone();
         Box::pin(async move {
@@ -482,7 +490,10 @@ fn resolve_field(
     if let Some(v) = env_val.map(str::trim).filter(|s| !s.is_empty()) {
         return (v.to_string(), ConfigSource::Env.as_label().to_string());
     }
-    (hard_default.to_string(), ConfigSource::Default.as_label().to_string())
+    (
+        hard_default.to_string(),
+        ConfigSource::Default.as_label().to_string(),
+    )
 }
 
 #[cfg(test)]

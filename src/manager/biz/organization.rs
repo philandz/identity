@@ -88,6 +88,35 @@ impl IdentityBiz {
         Ok(ListOrgMembersResponse { members })
     }
 
+    /// Like `list_org_members` but skips the caller's org-membership check.
+    /// Caller must hold `ManageAnyOrganization` permission (enforced by the
+    /// gRPC handler before reaching here).
+    pub async fn list_org_members_no_auth(
+        &self,
+        org_id: &str,
+    ) -> Result<ListOrgMembersResponse, Status> {
+        validate::list_org_members_input(org_id)?;
+
+        let members = self
+            .repo
+            .list_org_members(org_id)
+            .await
+            .map_err(Self::map_internal_error)?
+            .into_iter()
+            .map(|m| OrgMemberView {
+                user_id: m.user_id,
+                email: m.email,
+                display_name: m.display_name,
+                role: m.role as i32,
+                status: m.status as i32,
+                joined_at: m.joined_at,
+                avatar: m.avatar.unwrap_or_default(),
+            })
+            .collect();
+
+        Ok(ListOrgMembersResponse { members })
+    }
+
     pub async fn invite_member(
         &self,
         caller_user_id: &str,

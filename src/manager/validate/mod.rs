@@ -389,7 +389,9 @@ pub fn system_config(
 
     let mail_from = mail_from_address.trim();
     if mail_from.is_empty() || !mail_from.contains('@') {
-        return Err(Status::invalid_argument("From address must be a valid email"));
+        return Err(Status::invalid_argument(
+            "From address must be a valid email",
+        ));
     }
 
     Ok(())
