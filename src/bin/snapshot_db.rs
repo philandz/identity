@@ -154,7 +154,38 @@ async fn main() -> anyhow::Result<()> {
     }
     println!();
 
-    // ---- 6. Full user roster from `philand.users` ----
+    // ---- 5b. Real row counts for every table in `philandz` (post-migration) ----
+    let philandz_tables: Vec<String> = {
+        use sqlx::Row;
+        sqlx::query(
+            "SELECT TABLE_NAME as tn FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = 'philandz' ORDER BY TABLE_NAME",
+        )
+        .fetch_all(&pool)
+        .await?
+        .into_iter()
+        .map(|r| r.get::<String, _>("tn"))
+        .collect()
+    };
+    println!("[ROW_COUNTS:philandz] table_count={}", philandz_tables.len());
+    for tbl in &philandz_tables {
+        if !is_safe_identifier(tbl) {
+            println!("  philandz.{} SKIPPED (unsafe identifier)", tbl);
+            continue;
+        }
+        let sql = format!("SELECT COUNT(*) as cnt FROM `philandz`.`{}`", tbl);
+        match sqlx::query(&sql).fetch_one(&pool).await {
+            Ok(row) => {
+                use sqlx::Row;
+                let cnt: i64 = row.try_get("cnt").unwrap_or(-1);
+                println!("  philandz.{}: {}", tbl, cnt);
+            }
+            Err(e) => {
+                println!("  philandz.{}: ERROR ({})", tbl, e);
+            }
+        }
+    }
+    println!();
     let users = sqlx::query(
         "SELECT id as i, email as e, name as n, google_id as gid
          FROM philand.users ORDER BY email",
