@@ -48,3 +48,11 @@ philand_time = { package = "time", path = "../libs/time" }
 
 [dev-dependencies]
 serial_test = "3"
+
+[[bin]]
+name = "migrate_schemas"
+path = "src/bin/migrate_schemas.rs"
+
+[[bin]]
+name = "fix_migrations"
+path = "src/bin/fix_migrations.rs"
