@@ -97,6 +97,12 @@ async fn main() -> anyhow::Result<()> {
     // but are absent from the legacy `philand` schema.  These tables are
     // defined by identity's domain model and are needed for the identity
     // service to function against `philandz`.
+    //
+    // Idempotency: tables are created with `IF NOT EXISTS` so re-running is
+    // safe UNLESS the table was created with a previous (buggy) schema.
+    // The CREATE statement below is the authoritative one.  If you need to
+    // apply a schema change to an existing table, drop it first (or migrate
+    // in place with ALTER) — `IF NOT EXISTS` will skip the create.
     // -------------------------------------------------------------------------
 
     // `organizations` — top-level tenant container
@@ -107,8 +113,8 @@ async fn main() -> anyhow::Result<()> {
             name            VARCHAR(255) NOT NULL,
             owner_user_id   VARCHAR(36)  NOT NULL,
             status          VARCHAR(20)  NOT NULL DEFAULT 'active',
-            created_at      BIGINT       NOT NULL,
-            updated_at      BIGINT       NOT NULL,
+            created_at      BIGINT       NOT NULL DEFAULT (UNIX_TIMESTAMP()),
+            updated_at      BIGINT       NOT NULL DEFAULT (UNIX_TIMESTAMP()),
             deleted_at      BIGINT       DEFAULT NULL,
             INDEX idx_organizations_owner (owner_user_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -126,8 +132,8 @@ async fn main() -> anyhow::Result<()> {
             user_id     VARCHAR(36)  NOT NULL,
             org_role    VARCHAR(20)  NOT NULL,
             status      VARCHAR(20)  NOT NULL DEFAULT 'active',
-            joined_at   BIGINT       NOT NULL,
-            updated_at  BIGINT       NOT NULL,
+            joined_at   BIGINT       NOT NULL DEFAULT (UNIX_TIMESTAMP()),
+            updated_at  BIGINT       NOT NULL DEFAULT (UNIX_TIMESTAMP()),
             PRIMARY KEY (org_id, user_id),
             INDEX idx_org_members_user (user_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -150,7 +156,7 @@ async fn main() -> anyhow::Result<()> {
             expires_at      BIGINT       NOT NULL,
             accepted_at     BIGINT       DEFAULT NULL,
             revoked_at      BIGINT       DEFAULT NULL,
-            created_at      BIGINT       NOT NULL,
+            created_at      BIGINT       NOT NULL DEFAULT (UNIX_TIMESTAMP()),
             INDEX idx_invitations_org   (org_id),
             INDEX idx_invitations_email (email),
             INDEX idx_invitations_token (token_hash)
@@ -168,7 +174,7 @@ async fn main() -> anyhow::Result<()> {
             token_hash  VARCHAR(64)  NOT NULL PRIMARY KEY,
             user_id     VARCHAR(36)  NOT NULL,
             expires_at  BIGINT       NOT NULL,
-            created_at  BIGINT       NOT NULL
+            created_at  BIGINT       NOT NULL DEFAULT (UNIX_TIMESTAMP())
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         "#,
     )
@@ -185,7 +191,7 @@ async fn main() -> anyhow::Result<()> {
             token_hash  VARCHAR(64)  NOT NULL,
             expires_at  BIGINT       NOT NULL,
             used_at     BIGINT       DEFAULT NULL,
-            created_at  BIGINT       NOT NULL
+            created_at  BIGINT       NOT NULL DEFAULT (UNIX_TIMESTAMP())
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         "#,
     )
