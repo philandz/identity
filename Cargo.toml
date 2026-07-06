@@ -56,3 +56,7 @@ path = "src/bin/migrate_schemas.rs"
 [[bin]]
 name = "fix_migrations"
 path = "src/bin/fix_migrations.rs"
+
+[[bin]]
+name = "drop_defaultdb"
+path = "src/bin/drop_defaultdb.rs"
