@@ -718,6 +718,21 @@ impl IdentityRepository {
             .map_err(map_storage_error)
     }
 
+    pub async fn set_user_type(
+        &self,
+        user_id: &str,
+        user_type: UserType,
+    ) -> Result<(), sqlx::Error> {
+        let users = table_name(philand_table::table::USERS);
+        let sql = format!("UPDATE {users} SET user_type = ? WHERE id = ?");
+        sqlx::query(&sql)
+            .bind(user_type_to_db(user_type))
+            .bind(user_id)
+            .execute(&*self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn update_user_password(
         &self,
         user_id: &str,

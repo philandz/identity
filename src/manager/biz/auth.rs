@@ -41,7 +41,13 @@ impl IdentityBiz {
             return Ok(());
         }
 
-        // Already exists? Skip.
+        // Try to find an existing user with this email.  After the
+        // philand -> philandz migration, the configured SUPER_ADMIN_EMAIL
+        // may already exist as a v1 user (created by the legacy
+        // monolith) with user_type='normal'.  We must detect that case
+        // and promote the row to 'super_admin', otherwise the
+        // configured operator will silently be treated as a regular
+        // user.
         let existing = self
             .repo
             .find_user_by_email(email)
@@ -54,11 +60,23 @@ impl IdentityBiz {
             existing.is_some()
         );
 
-        if existing.is_some() {
-            tracing::info!(
-                "Super-admin user ({}) already exists — skipping init",
-                email
-            );
+        if let Some(user) = existing {
+            // Promote if needed
+            if user.user_type != "super_admin" {
+                self.repo
+                    .set_user_type(&user.id, UserType::UtSuperAdmin)
+                    .await
+                    .map_err(Self::map_internal_error)?;
+                tracing::info!(
+                    "Promoted existing user ({}) to super_admin (was '{}')",
+                    email, user.user_type
+                );
+            } else {
+                tracing::info!(
+                    "Super-admin user ({}) already exists — skipping init",
+                    email
+                );
+            }
             return Ok(());
         }
 

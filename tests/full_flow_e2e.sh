@@ -182,6 +182,25 @@ case "$V1_RESP" in
     *)                     fail "v1 user lookup returned unexpected: $V1_RESP" ;;
 esac
 
+# 7b. Verify the v1 user has at least one org (after bootstrap_v1_orgs).
+# This catches the case where someone forgets to bootstrap orgs and v1 users
+# see an empty organization list after login.
+V1_USER=$(curl -sS -X POST "$BASE_URL/login" \
+    -H "Content-Type: application/json" \
+    --data-raw '{"email":"admin@philand.local","password":"Aa@123456"}' 2>&1) || true
+V1_TOKEN=$(echo "$V1_USER" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))' 2>/dev/null || echo "")
+if [ -z "$V1_TOKEN" ]; then
+    echo "  (skip) could not get a token for v1 user admin@philand.local; org bootstrap check skipped"
+else
+    V1_ORG_RESP=$(curl -sS "$BASE_URL/organizations" -H "Authorization: Bearer $V1_TOKEN" 2>&1) || true
+    ORG_COUNT=$(echo "$V1_ORG_RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d.get("organizations",[])))' 2>/dev/null || echo 0)
+    if [ "$ORG_COUNT" -ge 1 ]; then
+        ok "v1 user has at least one org (count=$ORG_COUNT)"
+    else
+        fail "v1 user has no orgs after bootstrap — run bootstrap_v1_orgs binary"
+    fi
+fi
+
 # -----------------------------------------------------------------------------
 # 8. Cleanup: delete the test user via gRPC-admin endpoint (if available)
 # -----------------------------------------------------------------------------

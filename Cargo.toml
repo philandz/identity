@@ -72,3 +72,7 @@ path = "src/bin/backfill_display_name.rs"
 [[bin]]
 name = "fix_identity_schema"
 path = "src/bin/fix_identity_schema.rs"
+
+[[bin]]
+name = "bootstrap_v1_orgs"
+path = "src/bin/bootstrap_v1_orgs.rs"
