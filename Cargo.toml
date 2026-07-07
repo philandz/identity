@@ -76,3 +76,7 @@ path = "src/bin/fix_identity_schema.rs"
 [[bin]]
 name = "bootstrap_v1_orgs"
 path = "src/bin/bootstrap_v1_orgs.rs"
+
+[[bin]]
+name = "migrate_v1_to_v2"
+path = "src/bin/migrate_v1_to_v2.rs"

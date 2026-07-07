@@ -126,6 +126,13 @@ section "4. List organizations"
 ORG_RESP=$(curl -sS "$BASE_URL/organizations" -H "Authorization: Bearer $TOKEN" 2>&1) || true
 assert_contains '"organizations"' "$ORG_RESP" "GET /organizations returns orgs array"
 assert_contains "$TEST_NAME" "$ORG_RESP" "organization owner display_name is the user name"
+# Extract the org id for downstream tests (e.g. /api/budget/budgets?org_id=…)
+ORG_ID=$(echo "$ORG_RESP" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("organizations",[{}])[0].get("id","") if d.get("organizations") else "")' 2>/dev/null || echo "")
+if [ -z "$ORG_ID" ]; then
+    fail "could not extract org_id from /organizations response"
+fi
+# Export so subshell test sections can read it
+export ORG_ID
 
 # -----------------------------------------------------------------------------
 # 5. /profile returns display_name correctly
@@ -200,6 +207,30 @@ else
         fail "v1 user has no orgs after bootstrap — run bootstrap_v1_orgs binary"
     fi
 fi
+
+# 7c. Verify the budgets endpoint works (was previously broken with
+# "Unknown column 'b.org_id'"). This catches the case where the v1→v2
+# schema migration wasn't applied or the budget service was started before
+# the migration was run.
+BUDGET_RESP=$(curl -sS "${GATEWAY_URL:-http://127.0.0.1:9100}/api/budget/budgets?org_id=${ORG_ID}" \
+    -H "Authorization: Bearer $TOKEN" 2>&1) || true
+case "$BUDGET_RESP" in
+    *'"budgets":'*)
+        ok "GET /api/budget/budgets returns budgets array (transport error gone)"
+        ;;
+    *'"code":"transport error"'*)
+        fail "GET /api/budget/budgets returned transport error — budget service not running?"
+        ;;
+    *'"code":"internal"'*'transport'*)
+        fail "GET /api/budget/budgets returned transport error: $BUDGET_RESP"
+        ;;
+    *'"code":"internal"'*'Unknown column'*)
+        fail "GET /api/budget/budgets returned Unknown column error — run migrate_v1_to_v2 binary"
+        ;;
+    *)
+        fail "GET /api/budget/budgets returned unexpected: $BUDGET_RESP"
+        ;;
+esac
 
 # -----------------------------------------------------------------------------
 # 8. Cleanup: delete the test user via gRPC-admin endpoint (if available)
