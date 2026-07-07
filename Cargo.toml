@@ -60,3 +60,7 @@ path = "src/bin/fix_migrations.rs"
 [[bin]]
 name = "drop_defaultdb"
 path = "src/bin/drop_defaultdb.rs"
+
+[[bin]]
+name = "drop_philand"
+path = "src/bin/drop_philand.rs"

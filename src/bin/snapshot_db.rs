@@ -85,37 +85,48 @@ async fn main() -> anyhow::Result<()> {
         println!();
     }
 
-    // ---- 4. Real row counts for every table in `philand` ----
-    let philand_tables: Vec<String> = {
+    // ---- 4. Real row counts for every table in `philand` (if it still exists) ----
+    let philand_exists: i64 = {
         use sqlx::Row;
         sqlx::query(
-            "SELECT TABLE_NAME as tn FROM information_schema.TABLES
-             WHERE TABLE_SCHEMA = 'philand' ORDER BY TABLE_NAME",
+            "SELECT COUNT(*) as c FROM information_schema.SCHEMATA
+             WHERE SCHEMA_NAME = 'philand'",
         )
-        .fetch_all(&pool)
+        .fetch_one(&pool)
         .await?
-        .into_iter()
-        .map(|r| r.get::<String, _>("tn"))
-        .collect()
+        .get("c")
     };
-    println!("[ROW_COUNTS:philand] table_count={}", philand_tables.len());
-    for tbl in &philand_tables {
-        // Use identifier interpolation that we control (table names came from
-        // information_schema, not user input). We still quote them defensively
-        // by rejecting anything that doesn't match a safe identifier pattern.
-        if !is_safe_identifier(tbl) {
-            println!("  philand.{} SKIPPED (unsafe identifier)", tbl);
-            continue;
-        }
-        let sql = format!("SELECT COUNT(*) as cnt FROM `philand`.`{}`", tbl);
-        match sqlx::query(&sql).fetch_one(&pool).await {
-            Ok(row) => {
-                use sqlx::Row;
-                let cnt: i64 = row.try_get("cnt").unwrap_or(-1);
-                println!("  philand.{}: {}", tbl, cnt);
+    if philand_exists == 0 {
+        println!("[ROW_COUNTS:philand] schema does not exist (already dropped — post-migration state)");
+    } else {
+        let philand_tables: Vec<String> = {
+            use sqlx::Row;
+            sqlx::query(
+                "SELECT TABLE_NAME as tn FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = 'philand' ORDER BY TABLE_NAME",
+            )
+            .fetch_all(&pool)
+            .await?
+            .into_iter()
+            .map(|r| r.get::<String, _>("tn"))
+            .collect()
+        };
+        println!("[ROW_COUNTS:philand] table_count={}", philand_tables.len());
+        for tbl in &philand_tables {
+            if !is_safe_identifier(tbl) {
+                println!("  philand.{} SKIPPED (unsafe identifier)", tbl);
+                continue;
             }
-            Err(e) => {
-                println!("  philand.{}: ERROR ({})", tbl, e);
+            let sql = format!("SELECT COUNT(*) as cnt FROM `philand`.`{}`", tbl);
+            match sqlx::query(&sql).fetch_one(&pool).await {
+                Ok(row) => {
+                    use sqlx::Row;
+                    let cnt: i64 = row.try_get("cnt").unwrap_or(-1);
+                    println!("  philand.{}: {}", tbl, cnt);
+                }
+                Err(e) => {
+                    println!("  philand.{}: ERROR ({})", tbl, e);
+                }
             }
         }
     }
@@ -188,11 +199,11 @@ async fn main() -> anyhow::Result<()> {
     println!();
     let users = sqlx::query(
         "SELECT id as i, email as e, name as n, google_id as gid
-         FROM philand.users ORDER BY email",
+         FROM philandz.users ORDER BY email",
     )
     .fetch_all(&pool)
     .await?;
-    println!("[USERS:philand.users] row_count={}", users.len());
+    println!("[USERS:philandz.users] row_count={}", users.len());
     {
         use sqlx::Row;
         for row in &users {
@@ -208,8 +219,8 @@ async fn main() -> anyhow::Result<()> {
     }
     println!();
 
-    // ---- 7. Support tables in `philand` (existence check only) ----
-    println!("[SUPPORT_TABLES:philand]");
+    // ---- 7. Support tables in `philandz` (existence check only) ----
+    println!("[SUPPORT_TABLES:philandz]");
     for tbl in &[
         "user_oauth_providers",
         "platform_settings",
@@ -218,13 +229,13 @@ async fn main() -> anyhow::Result<()> {
     ] {
         let exists = sqlx::query(
             "SELECT 1 as x FROM information_schema.TABLES
-             WHERE TABLE_SCHEMA = 'philand' AND TABLE_NAME = ?",
+             WHERE TABLE_SCHEMA = 'philandz' AND TABLE_NAME = ?",
         )
         .bind(tbl)
         .fetch_optional(&pool)
         .await?
         .is_some();
-        println!("  philand.{}: {}", tbl, if exists { "EXISTS" } else { "MISSING" });
+        println!("  philandz.{}: {}", tbl, if exists { "EXISTS" } else { "MISSING" });
     }
     println!();
 
