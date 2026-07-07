@@ -12,7 +12,11 @@ pub struct DbUser {
     pub id: String,
     pub email: String,
     pub password_hash: String,
-    pub display_name: String,
+    // display_name is Option<String> because legacy v1-monolith rows have
+    // `display_name IS NULL` (the v1 schema only had `name`). The biz layer
+    // falls back to `name` or the user's email local-part at projection time.
+    // See: https://docs/superpowers/plans/2026-07-06-migrate-philand-to-philandz.md
+    pub display_name: Option<String>,
     pub avatar: Option<String>,
     pub bio: Option<String>,
     pub timezone: String,
@@ -230,9 +234,24 @@ impl From<DbUser> for user::User {
                 owner_id: String::new(),
                 status: status as i32,
             }),
-            email: db_user.email,
+            email: db_user.email.clone(),
             password_hash: db_user.password_hash,
-            display_name: db_user.display_name,
+            // Fallback chain: explicit display_name (after backfill) → email local-part.
+            // Legacy v1 rows had only `name`; the migration backfills display_name
+            // from name, but if any NULL/empty remain we still need a non-empty
+            // string for proto (proto3 strings are always defined).
+            display_name: db_user
+                .display_name
+                .clone()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| {
+                    db_user
+                        .email
+                        .split('@')
+                        .next()
+                        .unwrap_or("")
+                        .to_string()
+                }),
             user_type: user_type as i32,
             avatar: db_user.avatar.unwrap_or_default(),
             bio: db_user.bio.unwrap_or_default(),

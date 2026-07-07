@@ -72,10 +72,9 @@ impl IdentityBiz {
             .await
             .map_err(Self::map_internal_error)?;
 
-        let display_name = if db_user.display_name.trim().is_empty() {
-            None
-        } else {
-            Some(db_user.display_name)
+        let display_name = match db_user.display_name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(s) => Some(s.to_string()),
+            None => None,
         };
 
         self.enqueue_notification(NotificationEvent::PasswordChangeOtp {

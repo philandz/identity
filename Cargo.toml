@@ -64,3 +64,11 @@ path = "src/bin/drop_defaultdb.rs"
 [[bin]]
 name = "drop_philand"
 path = "src/bin/drop_philand.rs"
+
+[[bin]]
+name = "backfill_display_name"
+path = "src/bin/backfill_display_name.rs"
+
+[[bin]]
+name = "fix_identity_schema"
+path = "src/bin/fix_identity_schema.rs"

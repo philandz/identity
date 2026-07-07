@@ -174,7 +174,8 @@ impl IdentityBiz {
             .find_user_by_id(caller_user_id)
             .await
             .map_err(Self::map_internal_error)?
-            .map(|u| u.display_name)
+            .and_then(|u| u.display_name)
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "A team member".to_string());
         let org_role_human = match role {
             OrgRole::OrAdmin => "admin",

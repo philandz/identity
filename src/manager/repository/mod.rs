@@ -1506,7 +1506,7 @@ fn map_to_db_user(row: Map<String, Value>) -> DbUser {
         id: string_field(&row, "id"),
         email: string_field(&row, "email"),
         password_hash: string_field(&row, "password_hash"),
-        display_name: string_field(&row, "display_name"),
+        display_name: opt_string_field(&row, "display_name"),
         avatar: opt_string_field(&row, "avatar"),
         bio: opt_string_field(&row, "bio"),
         timezone: string_field(&row, "timezone"),

@@ -198,7 +198,7 @@ async fn main() -> anyhow::Result<()> {
     }
     println!();
     let users = sqlx::query(
-        "SELECT id as i, email as e, name as n, google_id as gid
+        "SELECT id as i, email as e, name as n, display_name as dn, google_id as gid
          FROM philandz.users ORDER BY email",
     )
     .fetch_all(&pool)
@@ -210,10 +210,11 @@ async fn main() -> anyhow::Result<()> {
             let id: String = row.get("i");
             let email: String = row.get("e");
             let name: String = row.try_get("n").unwrap_or_default();
+            let dn: Option<String> = row.try_get("dn").ok();
             let gid: Option<String> = row.try_get("gid").ok();
             println!(
-                "  user id={} email={} name={} google_id={:?}",
-                id, email, name, gid
+                "  user id={} email={} name={} display_name={:?} google_id={:?}",
+                id, email, name, dn, gid
             );
         }
     }
