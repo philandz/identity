@@ -192,6 +192,86 @@ async fn main() -> anyhow::Result<()> {
         println!("[alter] categories.kind converted from enum → VARCHAR(20)");
     }
 
+    // Convert categories.created_at / updated_at from DATETIME → BIGINT.
+    // Category service expects i64 (Unix timestamp) per its FromRow derive.
+    // The v1 schema had these as DATETIME; the v2 service can't decode them.
+    // Safe round-trip: UNIX_TIMESTAMP('2025-10-22 07:30:03') = 1761103803.
+    for col in &["created_at", "updated_at"] {
+        let dt: String = sqlx::query(
+            "SELECT DATA_TYPE as dt FROM information_schema.columns
+             WHERE table_schema = 'philandz' AND table_name = 'categories' AND column_name = ?",
+        )
+        .bind(col)
+        .fetch_one(&pool)
+        .await?
+        .get("dt");
+        if dt.to_lowercase() == "datetime" {
+            // Add a temporary BIGINT column, backfill from existing DATETIME,
+            // drop the old column, rename the new one.  This preserves data.
+            let tmp_col = format!("__new_{col}");
+            sqlx::query(&format!(
+                "ALTER TABLE philandz.categories ADD COLUMN {} BIGINT NULL",
+                tmp_col
+            ))
+            .execute(&pool)
+            .await?;
+            sqlx::query(&format!(
+                "UPDATE philandz.categories SET {} = UNIX_TIMESTAMP({})",
+                tmp_col, col
+            ))
+            .execute(&pool)
+            .await?;
+            sqlx::query(&format!("ALTER TABLE philandz.categories DROP COLUMN {}", col))
+                .execute(&pool)
+                .await?;
+            sqlx::query(&format!(
+                "ALTER TABLE philandz.categories CHANGE COLUMN {} {} BIGINT NOT NULL DEFAULT 0",
+                tmp_col, col
+            ))
+            .execute(&pool)
+            .await?;
+            println!("[convert] categories.{} DATETIME → BIGINT (UNIX_TIMESTAMP applied)", col);
+        }
+    }
+
+    // Convert budgets.created_at / updated_at from DATETIME → BIGINT.
+    // Budget service expects i64 (Unix timestamp).
+    for col in &["created_at", "updated_at"] {
+        let dt: String = sqlx::query(
+            "SELECT DATA_TYPE as dt FROM information_schema.columns
+             WHERE table_schema = 'philandz' AND table_name = 'budgets' AND column_name = ?",
+        )
+        .bind(col)
+        .fetch_one(&pool)
+        .await?
+        .get("dt");
+        if dt.to_lowercase() == "datetime" {
+            let tmp_col = format!("__new_{col}");
+            sqlx::query(&format!(
+                "ALTER TABLE philandz.budgets ADD COLUMN {} BIGINT NULL",
+                tmp_col
+            ))
+            .execute(&pool)
+            .await?;
+            sqlx::query(&format!(
+                "UPDATE philandz.budgets SET {} = UNIX_TIMESTAMP({})",
+                tmp_col, col
+            ))
+            .execute(&pool)
+            .await?;
+            sqlx::query(&format!("ALTER TABLE philandz.budgets DROP COLUMN {}", col))
+                .execute(&pool)
+                .await?;
+            sqlx::query(&format!(
+                "ALTER TABLE philandz.budgets CHANGE COLUMN {} {} BIGINT NOT NULL DEFAULT 0",
+                tmp_col, col
+            ))
+            .execute(&pool)
+            .await?;
+            println!("[convert] budgets.{} DATETIME → BIGINT (UNIX_TIMESTAMP applied)", col);
+        }
+    }
+
     // ----- entries: add v2-specific columns -----
     for (col, sql_type, default) in &[
         ("notes", "TEXT", "DEFAULT NULL"),
