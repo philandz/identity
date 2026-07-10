@@ -453,8 +453,8 @@ impl IdentityRepository {
         let rows = sqlx::query(&format!(
             "SELECT om.org_id, om.org_role, o.name \
              FROM {org_members} om \
-             INNER JOIN {organizations} o ON om.org_id = o.id \
-             WHERE om.user_id = ? AND om.status = ?"
+             INNER JOIN {organizations} o ON om.org_id = BINARY o.id \
+             WHERE BINARY om.user_id = BINARY ? AND om.status = ?"
         ))
         .bind(user_id)
         .bind(active_status)
@@ -487,8 +487,8 @@ impl IdentityRepository {
             "SELECT o.id, o.name, om.org_role, o.owner_user_id, o.status, \
                     o.created_at, o.updated_at, o.deleted_at, o.created_by, o.updated_by \
              FROM {organizations} o \
-             INNER JOIN {org_members} om ON o.id = om.org_id \
-             WHERE om.user_id = ? AND om.status = ?"
+             INNER JOIN {org_members} om ON o.id = BINARY om.org_id \
+             WHERE BINARY om.user_id = BINARY ? AND om.status = ?"
         ))
         .bind(user_id)
         .bind(active_status)
@@ -834,8 +834,8 @@ impl IdentityRepository {
         let rows = sqlx::query(&format!(
             "SELECT om.user_id, u.email, u.display_name, u.avatar, om.org_role, om.status, om.joined_at \
              FROM {org_members} om \
-             INNER JOIN {users} u ON om.user_id = u.id \
-             WHERE om.org_id = ? \
+             INNER JOIN {users} u ON om.user_id = BINARY u.id \
+             WHERE BINARY om.org_id = BINARY ? \
              ORDER BY om.joined_at ASC"
         ))
         .bind(org_id)
