@@ -38,7 +38,7 @@ philand_validator = { package = "validator", path = "../libs/validator" }
 philand_error = { package = "error", path = "../libs/error", features = ["utoipa"] }
 philand_configs = { package = "configs", path = "../libs/configs" }
 philand_storage = { package = "storage", path = "../libs/storage" }
-philand_table = { package = "table", path = "./libs/table" }
+philand_table = { package = "table", path = "../libs/table" }
 philand_application = { package = "application", path = "../libs/application" }
 philand_env = { package = "env", path = "../libs/env" }
 philand_queue = { package = "queue", path = "../libs/queue" }
