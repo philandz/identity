@@ -42,6 +42,7 @@ pub struct IdentityServiceConfig {
     pub super_admin_email: String,
     pub super_admin_password: String,
     pub google_client_id: String,
+    pub platform_master_key: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -93,6 +94,7 @@ impl IdentityServiceConfig {
             service_name: read_or_default("SERVICE_NAME", "identity"),
             super_admin_email: read_or_default("SUPER_ADMIN_EMAIL", "laphi1612@gmail.com"),
             super_admin_password: read_or_default("SUPER_ADMIN_PASSWORD", "Aa@123456"),
+            platform_master_key: read_or_default("PLATFORM_MASTER_KEY", ""),
         })
     }
 
