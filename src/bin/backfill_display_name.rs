@@ -47,10 +47,7 @@ async fn main() -> anyhow::Result<()> {
     )
     .execute(&pool)
     .await?;
-    println!(
-        "[execute] updated {} row(s)",
-        result.rows_affected()
-    );
+    println!("[execute] updated {} row(s)", result.rows_affected());
 
     // ---- 3. Verify ----
     let remaining_null = sqlx::query(
@@ -60,7 +57,10 @@ async fn main() -> anyhow::Result<()> {
     .fetch_one(&pool)
     .await?
     .get::<i64, _>("c");
-    println!("[verify] rows with NULL/empty display_name now: {}", remaining_null);
+    println!(
+        "[verify] rows with NULL/empty display_name now: {}",
+        remaining_null
+    );
 
     Ok(())
 }

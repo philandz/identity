@@ -62,21 +62,33 @@ async fn main() -> anyhow::Result<()> {
     // ----- budgets: v1 (owner_id, currency_code, archived, ...) → v2 (org_id, currency, status, deleted_at, created_by, updated_by) -----
     if !col_exists("budgets", "org_id").await? {
         sqlx::query("ALTER TABLE philandz.budgets ADD COLUMN org_id VARCHAR(36) NULL AFTER id")
-            .execute(&pool).await?;
-        sqlx::query("UPDATE philandz.budgets SET org_id = owner_id").execute(&pool).await?;
+            .execute(&pool)
+            .await?;
+        sqlx::query("UPDATE philandz.budgets SET org_id = owner_id")
+            .execute(&pool)
+            .await?;
         sqlx::query("ALTER TABLE philandz.budgets MODIFY COLUMN org_id VARCHAR(36) NOT NULL")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         sqlx::query("CREATE INDEX idx_budgets_org_id ON philandz.budgets (org_id)")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         println!("[alter] budgets.org_id added (backfilled from owner_id)");
     }
     if !col_exists("budgets", "currency").await? {
-        sqlx::query("ALTER TABLE philandz.budgets ADD COLUMN currency VARCHAR(8) NULL AFTER budget_type")
-            .execute(&pool).await?;
+        sqlx::query(
+            "ALTER TABLE philandz.budgets ADD COLUMN currency VARCHAR(8) NULL AFTER budget_type",
+        )
+        .execute(&pool)
+        .await?;
         sqlx::query("UPDATE philandz.budgets SET currency = currency_code")
-            .execute(&pool).await?;
-        sqlx::query("ALTER TABLE philandz.budgets MODIFY COLUMN currency VARCHAR(8) NOT NULL DEFAULT 'VND'")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
+        sqlx::query(
+            "ALTER TABLE philandz.budgets MODIFY COLUMN currency VARCHAR(8) NOT NULL DEFAULT 'VND'",
+        )
+        .execute(&pool)
+        .await?;
         println!("[alter] budgets.currency added (backfilled from currency_code)");
     }
     if !col_exists("budgets", "status").await? {
@@ -85,24 +97,35 @@ async fn main() -> anyhow::Result<()> {
         sqlx::query("UPDATE philandz.budgets SET status = CASE WHEN archived = 1 THEN 'archived' ELSE 'active' END")
             .execute(&pool).await?;
         sqlx::query("CREATE INDEX idx_budgets_status ON philandz.budgets (status)")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         println!("[alter] budgets.status added (backfilled from archived)");
     }
     if !col_exists("budgets", "created_by").await? {
-        sqlx::query("ALTER TABLE philandz.budgets ADD COLUMN created_by VARCHAR(36) NULL AFTER status")
-            .execute(&pool).await?;
+        sqlx::query(
+            "ALTER TABLE philandz.budgets ADD COLUMN created_by VARCHAR(36) NULL AFTER status",
+        )
+        .execute(&pool)
+        .await?;
         sqlx::query("UPDATE philandz.budgets SET created_by = owner_id")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         println!("[alter] budgets.created_by added (backfilled from owner_id)");
     }
     if !col_exists("budgets", "updated_by").await? {
-        sqlx::query("ALTER TABLE philandz.budgets ADD COLUMN updated_by VARCHAR(36) NULL AFTER created_by")
-            .execute(&pool).await?;
+        sqlx::query(
+            "ALTER TABLE philandz.budgets ADD COLUMN updated_by VARCHAR(36) NULL AFTER created_by",
+        )
+        .execute(&pool)
+        .await?;
         println!("[alter] budgets.updated_by added");
     }
     if !col_exists("budgets", "deleted_at").await? {
-        sqlx::query("ALTER TABLE philandz.budgets ADD COLUMN deleted_at BIGINT NULL AFTER updated_by")
-            .execute(&pool).await?;
+        sqlx::query(
+            "ALTER TABLE philandz.budgets ADD COLUMN deleted_at BIGINT NULL AFTER updated_by",
+        )
+        .execute(&pool)
+        .await?;
         println!("[alter] budgets.deleted_at added");
     }
 
@@ -112,8 +135,11 @@ async fn main() -> anyhow::Result<()> {
     // statement explicitly provides id, so this works.
     if !col_exists("budget_members", "id").await? {
         // Add id as VARCHAR(36) NULL first (must populate before making NOT NULL)
-        sqlx::query("ALTER TABLE philandz.budget_members ADD COLUMN id VARCHAR(36) NULL AFTER user_id")
-            .execute(&pool).await?;
+        sqlx::query(
+            "ALTER TABLE philandz.budget_members ADD COLUMN id VARCHAR(36) NULL AFTER user_id",
+        )
+        .execute(&pool)
+        .await?;
         // Populate id with a deterministic UUID derived from the
         // (budget_id, user_id) pair so it's stable across re-runs.
         sqlx::query(
@@ -129,23 +155,30 @@ async fn main() -> anyhow::Result<()> {
         .execute(&pool).await?;
         // Now make id NOT NULL UNIQUE
         sqlx::query("ALTER TABLE philandz.budget_members MODIFY COLUMN id VARCHAR(36) NOT NULL")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         sqlx::query("ALTER TABLE philandz.budget_members ADD UNIQUE KEY uq_budget_members_id (id)")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         println!("[alter] budget_members.id added (UNIQUE NOT NULL — composite PK kept for Aiven)");
     }
     if !col_exists("budget_members", "created_at").await? {
-        sqlx::query("ALTER TABLE philandz.budget_members ADD COLUMN created_at BIGINT NULL AFTER role")
-            .execute(&pool).await?;
+        sqlx::query(
+            "ALTER TABLE philandz.budget_members ADD COLUMN created_at BIGINT NULL AFTER role",
+        )
+        .execute(&pool)
+        .await?;
         sqlx::query("UPDATE philandz.budget_members SET created_at = UNIX_TIMESTAMP()")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         println!("[alter] budget_members.created_at added");
     }
     if !col_exists("budget_members", "updated_at").await? {
         sqlx::query("ALTER TABLE philandz.budget_members ADD COLUMN updated_at BIGINT NULL AFTER created_at")
             .execute(&pool).await?;
         sqlx::query("UPDATE philandz.budget_members SET updated_at = UNIX_TIMESTAMP()")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         println!("[alter] budget_members.updated_at added");
     }
     // Convert role enum → VARCHAR(16) (v2 service expects varchar)
@@ -156,7 +189,9 @@ async fn main() -> anyhow::Result<()> {
     .fetch_one(&pool)
     .await?
     .get("dt");
-    if role_type.to_lowercase() == "enum" || role_type.to_lowercase() == "enum('owner','manager','contributor','viewer')" {
+    if role_type.to_lowercase() == "enum"
+        || role_type.to_lowercase() == "enum('owner','manager','contributor','viewer')"
+    {
         sqlx::query("ALTER TABLE philandz.budget_members MODIFY COLUMN role VARCHAR(16) NOT NULL DEFAULT 'viewer'")
             .execute(&pool).await?;
         println!("[alter] budget_members.role converted from enum → VARCHAR(16)");
@@ -164,8 +199,11 @@ async fn main() -> anyhow::Result<()> {
 
     // ----- categories: v1 has budget_id + name + kind + is_hidden + color + icon + timestamps -----
     if !col_exists("categories", "deleted_at").await? {
-        sqlx::query("ALTER TABLE philandz.categories ADD COLUMN deleted_at BIGINT NULL AFTER updated_at")
-            .execute(&pool).await?;
+        sqlx::query(
+            "ALTER TABLE philandz.categories ADD COLUMN deleted_at BIGINT NULL AFTER updated_at",
+        )
+        .execute(&pool)
+        .await?;
         println!("[alter] categories.deleted_at added");
     }
     if !col_exists("categories", "created_by").await? {
@@ -188,7 +226,8 @@ async fn main() -> anyhow::Result<()> {
     .get("dt");
     if kind_type.to_lowercase().starts_with("enum") {
         sqlx::query("ALTER TABLE philandz.categories MODIFY COLUMN kind VARCHAR(20) NOT NULL")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         println!("[alter] categories.kind converted from enum → VARCHAR(20)");
     }
 
@@ -221,16 +260,22 @@ async fn main() -> anyhow::Result<()> {
             ))
             .execute(&pool)
             .await?;
-            sqlx::query(&format!("ALTER TABLE philandz.categories DROP COLUMN {}", col))
-                .execute(&pool)
-                .await?;
+            sqlx::query(&format!(
+                "ALTER TABLE philandz.categories DROP COLUMN {}",
+                col
+            ))
+            .execute(&pool)
+            .await?;
             sqlx::query(&format!(
                 "ALTER TABLE philandz.categories CHANGE COLUMN {} {} BIGINT NOT NULL DEFAULT 0",
                 tmp_col, col
             ))
             .execute(&pool)
             .await?;
-            println!("[convert] categories.{} DATETIME → BIGINT (UNIX_TIMESTAMP applied)", col);
+            println!(
+                "[convert] categories.{} DATETIME → BIGINT (UNIX_TIMESTAMP applied)",
+                col
+            );
         }
     }
 
@@ -268,7 +313,10 @@ async fn main() -> anyhow::Result<()> {
             ))
             .execute(&pool)
             .await?;
-            println!("[convert] budgets.{} DATETIME → BIGINT (UNIX_TIMESTAMP applied)", col);
+            println!(
+                "[convert] budgets.{} DATETIME → BIGINT (UNIX_TIMESTAMP applied)",
+                col
+            );
         }
     }
 
@@ -305,7 +353,8 @@ async fn main() -> anyhow::Result<()> {
     .get("dt");
     if entry_kind_type.to_lowercase().starts_with("enum") {
         sqlx::query("ALTER TABLE philandz.entries MODIFY COLUMN kind VARCHAR(20) NOT NULL")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         println!("[alter] entries.kind converted from enum → VARCHAR(20)");
     }
     // entries.currency_code: v1 is varchar(10), v2 expects CHAR(3)
@@ -340,14 +389,16 @@ async fn main() -> anyhow::Result<()> {
     }
     if !col_exists("entry_attachments", "deleted_at").await? {
         sqlx::query("ALTER TABLE philandz.entry_attachments ADD COLUMN deleted_at BIGINT NULL")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         println!("[alter] entry_attachments.deleted_at added");
     }
 
     // ----- entry_comments: add deleted_at -----
     if !col_exists("entry_comments", "deleted_at").await? {
         sqlx::query("ALTER TABLE philandz.entry_comments ADD COLUMN deleted_at BIGINT NULL")
-            .execute(&pool).await?;
+            .execute(&pool)
+            .await?;
         println!("[alter] entry_comments.deleted_at added");
     }
 
