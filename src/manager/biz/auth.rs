@@ -69,7 +69,8 @@ impl IdentityBiz {
                     .map_err(Self::map_internal_error)?;
                 tracing::info!(
                     "Promoted existing user ({}) to super_admin (was '{}')",
-                    email, user.user_type
+                    email,
+                    user.user_type
                 );
             } else {
                 tracing::info!(
