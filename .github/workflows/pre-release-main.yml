@@ -25,12 +25,30 @@ jobs:
           --health-retries=10
 
     env:
-      DATABASE_URL: mysql://philand:philand@127.0.0.1:3306/philand
+      DATABASE_URL: mysql://philand:philand@127.0.0.1:3306/philandz
       JWT_SECRET: prerelease-ci-secret
+      # IdentityServiceConfig::from_env() requires these on libs@main
+      # (c788a35 flipped SUPER_ADMIN_* to required). Production injects via
+      # SealedSecret; CI uses safe placeholder values.
+      SUPER_ADMIN_EMAIL: ci-admin@philand.test
+      SUPER_ADMIN_PASSWORD: ci-admin-password
+      PLATFORM_MASTER_KEY: ""
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Create philandz schema
+        # libs@main philand_table constants reference philandz.<table>
+        # but MYSQL_DATABASE only auto-creates the philand DB. Mirror
+        # ci-sandbox.yml setup so the pre-release-main check exercises the
+        # same environment the actual release will land on.
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot <<'SQL'
+          CREATE DATABASE IF NOT EXISTS philandz;
+          GRANT ALL PRIVILEGES ON philandz.* TO 'philand'@'%';
+          FLUSH PRIVILEGES;
+          SQL
 
       - name: Checkout protobuf repo
         uses: actions/checkout@v4
@@ -53,10 +71,10 @@ jobs:
           ln -sfn "$GITHUB_WORKSPACE/libs" "$GITHUB_WORKSPACE/../libs"
           ln -sfn "$GITHUB_WORKSPACE/protobuf" "$GITHUB_WORKSPACE/../protobuf"
 
-      - name: Install protoc
+      - name: Install protoc + mysql client
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libprotobuf-dev
+          sudo apt-get install -y protobuf-compiler libprotobuf-dev default-mysql-client
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
