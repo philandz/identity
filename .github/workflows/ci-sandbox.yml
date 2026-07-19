@@ -50,6 +50,19 @@ jobs:
           FLUSH PRIVILEGES;
           SQL
 
+      - name: Backup any existing philandz data
+        # Safety: dump whatever already sits in philandz (empty in CI but
+        # useful if a previous run left state behind, or if the schema is
+        # later pointed at a real DB). Stored under /tmp so the workflow
+        # upload can grab it post-run.
+        run: |
+          mkdir -p /tmp/philandz-backup
+          mysqldump -h 127.0.0.1 -uroot -proot \
+            --databases philandz \
+            --single-transaction --routines --triggers \
+            > /tmp/philandz-backup/philandz-pre-test.bak.sql 2>/dev/null || true
+          echo "Backup size: $(wc -c < /tmp/philandz-backup/philandz-pre-test.bak.sql 2>/dev/null || echo 0) bytes"
+
       - name: Checkout protobuf repo
         uses: actions/checkout@v4
         with:
