@@ -27,6 +27,12 @@ jobs:
     env:
       DATABASE_URL: mysql://philand:philand@127.0.0.1:3306/philand
       JWT_SECRET: sandbox-ci-secret
+      # IdentityServiceConfig::from_env() requires these on libs@sandbox
+      # (c788a35 flipped SUPER_ADMIN_* to required). Production injects via
+      # SealedSecret; CI uses safe placeholder values.
+      SUPER_ADMIN_EMAIL: ci-admin@philand.test
+      SUPER_ADMIN_PASSWORD: ci-admin-password
+      PLATFORM_MASTER_KEY: ""
 
     steps:
       - name: Checkout
