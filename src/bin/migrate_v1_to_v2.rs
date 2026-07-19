@@ -367,8 +367,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .fetch_optional(&pool)
         .await?
-        .map(|r| r.try_get::<i64, _>("ml").ok())
-        .flatten()
+        .and_then(|r| r.try_get::<i64, _>("ml").ok())
     };
     if currency_ml != Some(3) {
         sqlx::query("ALTER TABLE philandz.entries MODIFY COLUMN currency_code CHAR(3) NOT NULL DEFAULT 'VND'")
