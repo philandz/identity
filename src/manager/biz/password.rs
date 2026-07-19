@@ -70,15 +70,12 @@ impl IdentityBiz {
                 .await
                 .map_err(Self::map_internal_error)?;
 
-            let display_name = match user
+            let display_name = user
                 .display_name
                 .as_deref()
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
-            {
-                Some(s) => Some(s.to_string()),
-                None => None,
-            };
+                .map(str::to_string);
 
             self.enqueue_notification(super::NotificationEvent::PasswordReset {
                 email: email.to_string(),
