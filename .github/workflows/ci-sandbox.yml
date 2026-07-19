@@ -18,11 +18,6 @@ jobs:
           MYSQL_ROOT_PASSWORD: root
         ports:
           - 3306:3306
-        volumes:
-          # libs@sandbox's philand_table constants reference philandz.<table>,
-          # so identity biz queries hit the philandz schema. CI mysql only
-          # auto-creates the philand DB; create philandz + grant here.
-          - ${{ github.workspace }}/.ci/mysql-initdb:/docker-entrypoint-initdb.d:ro
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uphiland -pphiland"
           --health-interval=10s
@@ -42,6 +37,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Create philandz schema
+        # libs@sandbox philand_table constants reference philandz.<table>
+        # but MYSQL_DATABASE only auto-creates the philand DB. Run the
+        # schema + grant setup here so biz queries can INSERT into
+        # philandz.users etc.
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot <<'SQL'
+          CREATE DATABASE IF NOT EXISTS philandz;
+          GRANT ALL PRIVILEGES ON philandz.* TO 'philand'@'%';
+          GRANT ALL PRIVILEGES ON philandz.* TO 'philand'@'localhost';
+          GRANT ALL PRIVILEGES ON philandz.* TO 'philand'@'127.0.0.1';
+          FLUSH PRIVILEGES;
+          SQL
 
       - name: Checkout protobuf repo
         uses: actions/checkout@v4
@@ -64,10 +73,10 @@ jobs:
           ln -sfn "$GITHUB_WORKSPACE/libs" "$GITHUB_WORKSPACE/../libs"
           ln -sfn "$GITHUB_WORKSPACE/protobuf" "$GITHUB_WORKSPACE/../protobuf"
 
-      - name: Install protoc
+      - name: Install protoc + mysql client
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libprotobuf-dev
+          sudo apt-get install -y protobuf-compiler libprotobuf-dev default-mysql-client
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
