@@ -1,9 +1,14 @@
--- Add Google OAuth columns to the legacy `philand.users` table.
+-- Add Google OAuth columns to the v2 identity `philandz.users` table.
 --
--- The legacy `philand` schema is owned by the v1 monolith but the v2 identity
--- service queries it (via `philand.users`, etc.) for unified user management.
--- Migrations use `philand.<table>` explicitly because the connection's default
--- database (`defaultdb`) is a sqlx bookkeeping DB, not the real schema.
+-- The v2 identity service owns the `philandz` schema. Earlier migrations
+-- (initial_schema.sql, etc.) use bare table names so they inherit the
+-- connection's default DB. With DATABASE_URL pointing at philandz, those
+-- create tables under philandz.<name>.
+--
+-- This migration matches that reality — every reference here uses
+-- philandz.<table> explicitly because Aiven Cloud MySQL exposes multiple
+-- schemas and the v2 service must not silently cross into the legacy
+-- `philand` schema (owned by the v1 monolith).
 --
 -- Idempotent — each ALTER is gated by an information_schema check wrapped in
 -- a stored procedure so the migration can re-run after partial / dirty state.
@@ -23,7 +28,7 @@ BEGIN
     DECLARE v_exist INT DEFAULT 0;
     SELECT COUNT(*) INTO v_exist
     FROM information_schema.columns
-    WHERE table_schema = 'philand'
+    WHERE table_schema = 'philandz'
       AND table_name   = p_table
       AND column_name  = p_column;
     IF v_exist = 0 THEN
@@ -43,7 +48,7 @@ BEGIN
     DECLARE v_exist INT DEFAULT 0;
     SELECT COUNT(*) INTO v_exist
     FROM information_schema.statistics
-    WHERE table_schema = 'philand'
+    WHERE table_schema = 'philandz'
       AND table_name   = p_table
       AND index_name   = p_index;
     IF v_exist = 0 THEN
@@ -55,34 +60,34 @@ BEGIN
 END;
 
 -- ---------------------------------------------------------------------------
--- Add missing columns to philand.users (idempotent).
+-- Add missing columns to philandz.users (idempotent).
 -- ---------------------------------------------------------------------------
 -- Add display_name, user_type, status, deleted_at, created_by, updated_by,
 -- google_id, google_email, google_avatar. No AFTER clauses — order doesn't
 -- matter functionally, and adding AFTER status when status doesn't exist yet
 -- would fail. Subsequent ALTERs (e.g. `AFTER google_id`) reference columns
 -- that already exist by that point.
-CALL mig_add_col_if_missing('users', 'display_name',  'ALTER TABLE philand.users ADD COLUMN display_name VARCHAR(255) NULL');
-CALL mig_add_col_if_missing('users', 'user_type',     'ALTER TABLE philand.users ADD COLUMN user_type VARCHAR(20) NOT NULL DEFAULT ''normal''');
-CALL mig_add_col_if_missing('users', 'status',        'ALTER TABLE philand.users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT ''active''');
-CALL mig_add_col_if_missing('users', 'deleted_at',    'ALTER TABLE philand.users ADD COLUMN deleted_at BIGINT NULL');
-CALL mig_add_col_if_missing('users', 'created_by',    'ALTER TABLE philand.users ADD COLUMN created_by VARCHAR(36) NULL');
-CALL mig_add_col_if_missing('users', 'updated_by',    'ALTER TABLE philand.users ADD COLUMN updated_by VARCHAR(36) NULL');
-CALL mig_add_col_if_missing('users', 'google_id',     'ALTER TABLE philand.users ADD COLUMN google_id VARCHAR(128) NULL');
-CALL mig_add_col_if_missing('users', 'google_email',  'ALTER TABLE philand.users ADD COLUMN google_email VARCHAR(255) NULL');
-CALL mig_add_col_if_missing('users', 'google_avatar', 'ALTER TABLE philand.users ADD COLUMN google_avatar VARCHAR(512) NULL');
+CALL mig_add_col_if_missing('users', 'display_name',  'ALTER TABLE philandz.users ADD COLUMN display_name VARCHAR(255) NULL');
+CALL mig_add_col_if_missing('users', 'user_type',     'ALTER TABLE philandz.users ADD COLUMN user_type VARCHAR(20) NOT NULL DEFAULT ''normal''');
+CALL mig_add_col_if_missing('users', 'status',        'ALTER TABLE philandz.users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT ''active''');
+CALL mig_add_col_if_missing('users', 'deleted_at',    'ALTER TABLE philandz.users ADD COLUMN deleted_at BIGINT NULL');
+CALL mig_add_col_if_missing('users', 'created_by',    'ALTER TABLE philandz.users ADD COLUMN created_by VARCHAR(36) NULL');
+CALL mig_add_col_if_missing('users', 'updated_by',    'ALTER TABLE philandz.users ADD COLUMN updated_by VARCHAR(36) NULL');
+CALL mig_add_col_if_missing('users', 'google_id',     'ALTER TABLE philandz.users ADD COLUMN google_id VARCHAR(128) NULL');
+CALL mig_add_col_if_missing('users', 'google_email',  'ALTER TABLE philandz.users ADD COLUMN google_email VARCHAR(255) NULL');
+CALL mig_add_col_if_missing('users', 'google_avatar', 'ALTER TABLE philandz.users ADD COLUMN google_avatar VARCHAR(512) NULL');
 
-CALL mig_add_idx_if_missing('users', 'uk_users_google_id', 'ALTER TABLE philand.users ADD UNIQUE INDEX uk_users_google_id (google_id)');
+CALL mig_add_idx_if_missing('users', 'uk_users_google_id', 'ALTER TABLE philandz.users ADD UNIQUE INDEX uk_users_google_id (google_id)');
 
 -- ---------------------------------------------------------------------------
 -- Support tables in `philand` schema (idempotent — IF NOT EXISTS).
 -- ---------------------------------------------------------------------------
--- Note: FOREIGN KEY constraints intentionally omitted — philand.users.id is
--- char(36) (legacy monolith schema) and FKs can be problematic across mixed
--- column types. Application code enforces referential integrity. Indexes are
--- still added for query performance.
+-- Note: FOREIGN KEY constraints intentionally omitted — philandz.users.id is
+-- char(36) and FKs can be problematic across mixed column types. Application
+-- code enforces referential integrity. Indexes are still added for query
+-- performance.
 
-CREATE TABLE IF NOT EXISTS philand.user_oauth_providers (
+CREATE TABLE IF NOT EXISTS philandz.user_oauth_providers (
     id           VARCHAR(36)  NOT NULL PRIMARY KEY,
     user_id      VARCHAR(36)  NOT NULL,
     provider     VARCHAR(20)  NOT NULL COMMENT 'google',
@@ -93,7 +98,7 @@ CREATE TABLE IF NOT EXISTS philand.user_oauth_providers (
     INDEX idx_user_oauth_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS philand.platform_settings (
+CREATE TABLE IF NOT EXISTS philandz.platform_settings (
     `key`            VARCHAR(64)  NOT NULL PRIMARY KEY,
     value_ciphertext TEXT         NOT NULL,
     updated_by       VARCHAR(36)  NULL,
@@ -101,14 +106,14 @@ CREATE TABLE IF NOT EXISTS philand.platform_settings (
     updated_at       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS philand.platform_settings_public (
+CREATE TABLE IF NOT EXISTS philandz.platform_settings_public (
     `key`       VARCHAR(64)  NOT NULL PRIMARY KEY,
     value_json  JSON         NOT NULL,
     updated_by  VARCHAR(36)  NULL,
     updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE IF NOT EXISTS philand.password_change_otps (
+CREATE TABLE IF NOT EXISTS philandz.password_change_otps (
     id           VARCHAR(36)    NOT NULL PRIMARY KEY,
     user_id      VARCHAR(36)    NOT NULL,
     otp_hash     VARCHAR(64)    NOT NULL,

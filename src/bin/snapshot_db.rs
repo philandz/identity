@@ -48,16 +48,16 @@ async fn main() -> anyhow::Result<()> {
         .await?
         .get::<i64, _>("c")
     };
-    println!("[philandz_present] {}", if philandz_present > 0 { "YES" } else { "NO" });
+    println!(
+        "[philandz_present] {}",
+        if philandz_present > 0 { "YES" } else { "NO" }
+    );
     println!();
 
     // ---- 3. For each schema, list its tables ----
     let all_schemas: Vec<String> = {
         use sqlx::Row;
-        schemas
-            .iter()
-            .map(|r| r.get::<String, _>("sn"))
-            .collect()
+        schemas.iter().map(|r| r.get::<String, _>("sn")).collect()
     };
     for schema in &all_schemas {
         let tbls = sqlx::query(
@@ -97,7 +97,9 @@ async fn main() -> anyhow::Result<()> {
         .get("c")
     };
     if philand_exists == 0 {
-        println!("[ROW_COUNTS:philand] schema does not exist (already dropped — post-migration state)");
+        println!(
+            "[ROW_COUNTS:philand] schema does not exist (already dropped — post-migration state)"
+        );
     } else {
         let philand_tables: Vec<String> = {
             use sqlx::Row;
@@ -145,7 +147,10 @@ async fn main() -> anyhow::Result<()> {
         .map(|r| r.get::<String, _>("tn"))
         .collect()
     };
-    println!("[ROW_COUNTS:defaultdb] table_count={}", defaultdb_tables.len());
+    println!(
+        "[ROW_COUNTS:defaultdb] table_count={}",
+        defaultdb_tables.len()
+    );
     for tbl in &defaultdb_tables {
         if !is_safe_identifier(tbl) {
             println!("  defaultdb.{} SKIPPED (unsafe identifier)", tbl);
@@ -178,7 +183,10 @@ async fn main() -> anyhow::Result<()> {
         .map(|r| r.get::<String, _>("tn"))
         .collect()
     };
-    println!("[ROW_COUNTS:philandz] table_count={}", philandz_tables.len());
+    println!(
+        "[ROW_COUNTS:philandz] table_count={}",
+        philandz_tables.len()
+    );
     for tbl in &philandz_tables {
         if !is_safe_identifier(tbl) {
             println!("  philandz.{} SKIPPED (unsafe identifier)", tbl);
@@ -236,7 +244,11 @@ async fn main() -> anyhow::Result<()> {
         .fetch_optional(&pool)
         .await?
         .is_some();
-        println!("  philandz.{}: {}", tbl, if exists { "EXISTS" } else { "MISSING" });
+        println!(
+            "  philandz.{}: {}",
+            tbl,
+            if exists { "EXISTS" } else { "MISSING" }
+        );
     }
     println!();
 
@@ -245,8 +257,5 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn is_safe_identifier(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }

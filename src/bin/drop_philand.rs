@@ -77,11 +77,10 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    let philandz_user_count: i64 =
-        sqlx::query("SELECT COUNT(*) as c FROM philandz.users")
-            .fetch_one(&pool)
-            .await?
-            .get("c");
+    let philandz_user_count: i64 = sqlx::query("SELECT COUNT(*) as c FROM philandz.users")
+        .fetch_one(&pool)
+        .await?
+        .get("c");
     if philandz_user_count != 17 {
         anyhow::bail!(
             "philandz.users has {} rows, expected 17. Refusing to drop \
@@ -96,9 +95,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ---- 3. Drop ----
     println!("\n[execute] DROP SCHEMA philand...");
-    sqlx::query("DROP SCHEMA philand")
-        .execute(&pool)
-        .await?;
+    sqlx::query("DROP SCHEMA philand").execute(&pool).await?;
     println!("[execute] drop committed.");
 
     // ---- 4. Verify ----
@@ -114,7 +111,10 @@ async fn main() -> anyhow::Result<()> {
     if remaining.is_empty() {
         println!("\n[done] philand schema is gone. The migration is complete.");
     } else {
-        println!("\n[WARN] philand still listed in information_schema: {:?}", remaining);
+        println!(
+            "\n[WARN] philand still listed in information_schema: {:?}",
+            remaining
+        );
     }
 
     // Confirm philandz is untouched.
@@ -122,14 +122,14 @@ async fn main() -> anyhow::Result<()> {
         .fetch_one(&pool)
         .await?
         .get("c");
-    println!("[verify] philandz.users still has {} rows (unchanged)", final_count);
+    println!(
+        "[verify] philandz.users still has {} rows (unchanged)",
+        final_count
+    );
 
     Ok(())
 }
 
 fn is_safe_identifier(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }

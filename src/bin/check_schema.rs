@@ -40,7 +40,10 @@ async fn main() -> anyhow::Result<()> {
             let d: Option<String> = row.try_get("COLUMN_DEFAULT").ok();
             let nn: String = row.get("IS_NULLABLE");
             let e: String = row.try_get("EXTRA").unwrap_or_default();
-            println!("  {:>22} {:<28} nullable={} default={:?} {}", n, t, nn, d, e);
+            println!(
+                "  {:>22} {:<28} nullable={} default={:?} {}",
+                n, t, nn, d, e
+            );
         }
         println!();
     }
@@ -82,7 +85,12 @@ async fn main() -> anyhow::Result<()> {
         let id: String = row.get("id");
         let name: String = row.get("name");
         let owner_id: String = row.get("owner_user_id");
-        println!("  org={} (id={}) owner_id={}", name, &id[..8], &owner_id[..8]);
+        println!(
+            "  org={} (id={}) owner_id={}",
+            name,
+            &id[..8],
+            &owner_id[..8]
+        );
     }
 
     // Print member org_id + user_id pairs; look up emails separately to
@@ -98,7 +106,12 @@ async fn main() -> anyhow::Result<()> {
         let org_id: String = row.get("org_id");
         let user_id: String = row.get("user_id");
         let role: String = row.try_get("org_role").unwrap_or_default();
-        println!("  org={} user={} role={}", &org_id[..8], &user_id[..8], role);
+        println!(
+            "  org={} user={} role={}",
+            &org_id[..8],
+            &user_id[..8],
+            role
+        );
     }
 
     // Cross-check: which v1 users are members of any org?

@@ -54,11 +54,12 @@ async fn main() -> anyhow::Result<()> {
         let org_name = format!("{}'s Personal", email.split('@').next().unwrap_or("user"));
 
         // Check org doesn't already exist (race guard)
-        let exists: i64 = sqlx::query("SELECT COUNT(*) as c FROM philandz.organizations WHERE id = ?")
-            .bind(&org_id)
-            .fetch_one(&pool)
-            .await?
-            .get("c");
+        let exists: i64 =
+            sqlx::query("SELECT COUNT(*) as c FROM philandz.organizations WHERE id = ?")
+                .bind(&org_id)
+                .fetch_one(&pool)
+                .await?
+                .get("c");
         if exists > 0 {
             skipped += 1;
             continue;
