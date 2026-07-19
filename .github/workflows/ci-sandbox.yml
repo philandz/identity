@@ -47,8 +47,6 @@ jobs:
           mysql -h 127.0.0.1 -uroot -proot <<'SQL'
           CREATE DATABASE IF NOT EXISTS philandz;
           GRANT ALL PRIVILEGES ON philandz.* TO 'philand'@'%';
-          GRANT ALL PRIVILEGES ON philandz.* TO 'philand'@'localhost';
-          GRANT ALL PRIVILEGES ON philandz.* TO 'philand'@'127.0.0.1';
           FLUSH PRIVILEGES;
           SQL
 
