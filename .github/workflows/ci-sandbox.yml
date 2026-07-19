@@ -18,6 +18,11 @@ jobs:
           MYSQL_ROOT_PASSWORD: root
         ports:
           - 3306:3306
+        volumes:
+          # libs@sandbox's philand_table constants reference philandz.<table>,
+          # so identity biz queries hit the philandz schema. CI mysql only
+          # auto-creates the philand DB; create philandz + grant here.
+          - ${{ github.workspace }}/.ci/mysql-initdb:/docker-entrypoint-initdb.d:ro
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uphiland -pphiland"
           --health-interval=10s
