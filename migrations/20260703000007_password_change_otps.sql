@@ -4,9 +4,9 @@
 -- lifecycle: short TTL, brute-force protection via attempts/max_attempts.
 
 CREATE TABLE IF NOT EXISTS password_change_otps (
-    id           VARCHAR(36)    NOT NULL PRIMARY KEY,
-    user_id      VARCHAR(36)    NOT NULL,
-    otp_hash     VARCHAR(64)    NOT NULL,
+    id           VARCHAR(36)    COLLATE utf8mb4_unicode_ci NOT NULL PRIMARY KEY,
+    user_id      VARCHAR(36)    COLLATE utf8mb4_unicode_ci NOT NULL,
+    otp_hash     VARCHAR(64)    COLLATE utf8mb4_unicode_ci NOT NULL,
     expires_at   TIMESTAMP      NOT NULL,
     attempts     TINYINT UNSIGNED NOT NULL DEFAULT 0,
     max_attempts TINYINT UNSIGNED NOT NULL DEFAULT 5,
@@ -15,4 +15,4 @@ CREATE TABLE IF NOT EXISTS password_change_otps (
     CONSTRAINT fk_password_change_otps_user FOREIGN KEY (user_id)
         REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_password_change_otps_user_active (user_id, used_at, expires_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
