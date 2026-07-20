@@ -145,7 +145,10 @@ async fn main() -> anyhow::Result<()> {
         .map(|r| r.get::<String, _>("tn"))
         .collect()
     };
-    println!("\n[verify] tables now in defaultdb ({} total):", remaining.len());
+    println!(
+        "\n[verify] tables now in defaultdb ({} total):",
+        remaining.len()
+    );
     for t in &remaining {
         println!("  defaultdb.{}", t);
     }
@@ -154,17 +157,12 @@ async fn main() -> anyhow::Result<()> {
         println!("\n[done] Task 5b complete: defaultdb contains only _sqlx_migrations.");
         println!("       v2 services must rebuild their domain tables on next start.");
     } else {
-        println!(
-            "\n[WARN] unexpected tables remain in defaultdb — review above."
-        );
+        println!("\n[WARN] unexpected tables remain in defaultdb — review above.");
     }
 
     Ok(())
 }
 
 fn is_safe_identifier(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }

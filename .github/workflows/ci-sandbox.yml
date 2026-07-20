@@ -25,12 +25,43 @@ jobs:
           --health-retries=10
 
     env:
-      DATABASE_URL: mysql://philand:philand@127.0.0.1:3306/philand
+      DATABASE_URL: mysql://philand:philand@127.0.0.1:3306/philandz
       JWT_SECRET: sandbox-ci-secret
+      # IdentityServiceConfig::from_env() requires these on libs@sandbox
+      # (c788a35 flipped SUPER_ADMIN_* to required). Production injects via
+      # SealedSecret; CI uses safe placeholder values.
+      SUPER_ADMIN_EMAIL: ci-admin@philand.test
+      SUPER_ADMIN_PASSWORD: ci-admin-password
+      PLATFORM_MASTER_KEY: ""
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Create philandz schema
+        # libs@sandbox philand_table constants reference philandz.<table>
+        # but MYSQL_DATABASE only auto-creates the philand DB. Run the
+        # schema + grant setup here so biz queries can INSERT into
+        # philandz.users etc.
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot <<'SQL'
+          CREATE DATABASE IF NOT EXISTS philandz;
+          GRANT ALL PRIVILEGES ON philandz.* TO 'philand'@'%';
+          FLUSH PRIVILEGES;
+          SQL
+
+      - name: Backup any existing philandz data
+        # Safety: dump whatever already sits in philandz (empty in CI but
+        # useful if a previous run left state behind, or if the schema is
+        # later pointed at a real DB). Stored under /tmp so the workflow
+        # upload can grab it post-run.
+        run: |
+          mkdir -p /tmp/philandz-backup
+          mysqldump -h 127.0.0.1 -uroot -proot \
+            --databases philandz \
+            --single-transaction --routines --triggers \
+            > /tmp/philandz-backup/philandz-pre-test.bak.sql 2>/dev/null || true
+          echo "Backup size: $(wc -c < /tmp/philandz-backup/philandz-pre-test.bak.sql 2>/dev/null || echo 0) bytes"
 
       - name: Checkout protobuf repo
         uses: actions/checkout@v4
@@ -53,10 +84,10 @@ jobs:
           ln -sfn "$GITHUB_WORKSPACE/libs" "$GITHUB_WORKSPACE/../libs"
           ln -sfn "$GITHUB_WORKSPACE/protobuf" "$GITHUB_WORKSPACE/../protobuf"
 
-      - name: Install protoc
+      - name: Install protoc + mysql client
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libprotobuf-dev
+          sudo apt-get install -y protobuf-compiler libprotobuf-dev default-mysql-client
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

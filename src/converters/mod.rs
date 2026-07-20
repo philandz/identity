@@ -244,14 +244,7 @@ impl From<DbUser> for user::User {
                 .display_name
                 .clone()
                 .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| {
-                    db_user
-                        .email
-                        .split('@')
-                        .next()
-                        .unwrap_or("")
-                        .to_string()
-                }),
+                .unwrap_or_else(|| db_user.email.split('@').next().unwrap_or("").to_string()),
             user_type: user_type as i32,
             avatar: db_user.avatar.unwrap_or_default(),
             bio: db_user.bio.unwrap_or_default(),

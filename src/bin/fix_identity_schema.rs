@@ -33,21 +33,18 @@ async fn main() -> anyhow::Result<()> {
     // timestamps that block the type conversion below.  Since the 5 tables
     // have no other v1-monolith data, removing them is safe and lets us
     // convert columns to DATETIME without ambiguity.
-    let org_count: i64 =
-        sqlx::query("SELECT COUNT(*) as c FROM philandz.organizations")
-            .fetch_one(&pool)
-            .await?
-            .get("c");
-    let member_count: i64 =
-        sqlx::query("SELECT COUNT(*) as c FROM philandz.organization_members")
-            .fetch_one(&pool)
-            .await?
-            .get("c");
-    let inv_count: i64 =
-        sqlx::query("SELECT COUNT(*) as c FROM philandz.organization_invitations")
-            .fetch_one(&pool)
-            .await?
-            .get("c");
+    let org_count: i64 = sqlx::query("SELECT COUNT(*) as c FROM philandz.organizations")
+        .fetch_one(&pool)
+        .await?
+        .get("c");
+    let member_count: i64 = sqlx::query("SELECT COUNT(*) as c FROM philandz.organization_members")
+        .fetch_one(&pool)
+        .await?
+        .get("c");
+    let inv_count: i64 = sqlx::query("SELECT COUNT(*) as c FROM philandz.organization_invitations")
+        .fetch_one(&pool)
+        .await?
+        .get("c");
     if org_count > 0 || member_count > 0 || inv_count > 0 {
         println!(
             "[cleanup] tables have orphan data (orgs={} members={} invites={}); deleting",
@@ -105,8 +102,7 @@ async fn main() -> anyhow::Result<()> {
             if !col_exists(tbl, col).await? {
                 let sql = format!(
                     "ALTER TABLE `philandz`.`{}` ADD COLUMN `{}` VARCHAR(36) DEFAULT NULL",
-                    tbl,
-                    col
+                    tbl, col
                 );
                 sqlx::query(&sql).execute(&pool).await?;
                 println!("[add] philandz.{}.{}", tbl, col);
@@ -214,8 +210,5 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn is_safe_identifier(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }

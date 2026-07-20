@@ -12,7 +12,7 @@ pub mod repo;
 
 #[derive(Debug, Error)]
 pub enum StorageError {
-    #[error("sqlx error")]
+    #[error("sqlx error: {0}")]
     Sqlx(#[from] sqlx::Error),
     #[error("migration error")]
     Migrate(#[from] sqlx::migrate::MigrateError),
