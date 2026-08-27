@@ -176,7 +176,10 @@ async fn main() -> anyhow::Result<()> {
 
     let http_app = Router::new()
         .route("/health", get(health_check))
-        .route("/metrics", get(move || async move { metrics_handle.render() }))
+        .route(
+            "/metrics",
+            get(move || async move { metrics_handle.render() }),
+        )
         .merge(rest::router())
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", openapi))
         .with_state(biz);
