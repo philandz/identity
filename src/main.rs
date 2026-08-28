@@ -39,6 +39,12 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to init identity repository: {e}"))?;
     tracing::info!("Storage initialized");
 
+    // Install metrics recorder and spawn warn task.
+    let metrics_handle = philand_storage::metrics::install_recorder().await?;
+    tokio::spawn(philand_storage::metrics::spawn_warn_task(
+        philand_configs::MetricsConfig::from_env().acquire_warn_p99_ms,
+    ));
+
     // Consul: register service and read KV config (best-effort)
     if let Err(e) = config.register_consul().await {
         tracing::warn!("Consul registration failed: {e}. Continuing without Consul.");
@@ -170,6 +176,10 @@ async fn main() -> anyhow::Result<()> {
 
     let http_app = Router::new()
         .route("/health", get(health_check))
+        .route(
+            "/metrics",
+            get(move || async move { metrics_handle.render() }),
+        )
         .merge(rest::router())
         .merge(SwaggerUi::new("/docs").url("/api-docs/openapi.json", openapi))
         .with_state(biz);

@@ -1,3 +1,6 @@
+// tonic::Status is large; allow result_large_err for these RPC handlers
+#![allow(clippy::result_large_err)]
+
 use tonic::Status;
 
 use crate::manager::validate;
