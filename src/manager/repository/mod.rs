@@ -117,7 +117,7 @@ impl IdentityRepository {
 
     pub fn from_pool(pool: std::sync::Arc<sqlx::Pool<sqlx::MySql>>) -> Self {
         Self {
-            inner: philand_storage::repo::Repo::from_pool(pool.clone(), None),
+            inner: philand_storage::repo::Repo::from_pool(pool.clone()),
             pool,
         }
     }
