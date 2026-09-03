@@ -45,6 +45,7 @@ philand_queue = { package = "queue", path = "../libs/queue" }
 philand_notify = { package = "notify", path = "../libs/notify" }
 philand_ssh = { package = "ssh", path = "../libs/ssh" }
 philand_time = { package = "time", path = "../libs/time" }
+metrics-exporter-prometheus = "0.15"
 
 [dev-dependencies]
 serial_test = "3"
