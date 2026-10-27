@@ -24,6 +24,16 @@ pub struct Claims {
     /// backward-compatible with pre-user_type tokens (returns empty string).
     #[serde(default)]
     pub user_type: String,
+    /// Unique token id.
+    ///
+    /// HS256 is deterministic, so without a unique claim two tokens issued for
+    /// the same user in the same second are byte-identical. A refresh that ran
+    /// within the same second as the login then handed back the very token it
+    /// had just revoked, logging the user out.
+    ///
+    /// `#[serde(default)]` keeps tokens issued before this claim valid.
+    #[serde(default)]
+    pub jti: String,
     pub exp: usize,
 }
 
@@ -45,6 +55,7 @@ impl IdentityBiz {
             email: db_user.email.clone(),
             org_id: org_id.to_owned(),
             user_type: db_user.user_type.clone(),
+            jti: uuid::Uuid::new_v4().to_string(),
             exp: (Utc::now() + Duration::hours(24)).timestamp() as usize,
         };
 
