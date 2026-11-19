@@ -1,6 +1,7 @@
 mod admin;
 mod auth;
 pub mod authz;
+pub mod contacts;
 mod organization;
 mod password;
 pub mod password_change;

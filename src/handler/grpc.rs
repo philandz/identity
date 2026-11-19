@@ -33,6 +33,8 @@ use crate::pb::service::identity::{
     GetResendConfigResponse,
     GetSystemConfigRequest,
     GetSystemConfigResponse,
+    GetUserContactsRequest,
+    GetUserContactsResponse,
     GetUserRequest,
     GetUserResponse,
     InviteMemberRequest,
@@ -527,6 +529,19 @@ impl IdentityService for IdentityHandler {
             .test_resend_config(&claims.sub, &request.into_inner().recipient_email)
             .await?;
         Ok(Response::new(resp))
+    }
+
+    // -- Internal (service-to-service) ---------------------------------
+
+    async fn get_user_contacts(
+        &self,
+        request: Request<GetUserContactsRequest>,
+    ) -> Result<Response<GetUserContactsResponse>, Status> {
+        crate::manager::biz::contacts::check_internal_token(request.metadata())?;
+        let req = request.into_inner();
+        Ok(Response::new(
+            self.biz.get_user_contacts(&req.user_ids).await?,
+        ))
     }
 
     // -- Super-admin system configuration -------------------------------
