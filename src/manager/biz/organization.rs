@@ -431,6 +431,73 @@ impl IdentityBiz {
             .map_err(Self::map_internal_error)
     }
 
+    /// Invitations waiting for the caller (matched on their account email).
+    pub async fn list_my_invitations(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<crate::manager::repository::MyInvitationRow>, Status> {
+        let email = self.caller_email(user_id).await?;
+        self.repo
+            .find_pending_invitations_for_email(&email)
+            .await
+            .map_err(Self::map_internal_error)
+    }
+
+    /// The caller accepts an invitation addressed to them, without needing the emailed token.
+    pub async fn accept_my_invitation(
+        &self,
+        user_id: &str,
+        invitation_id: &str,
+    ) -> Result<AcceptInvitationResponse, Status> {
+        let email = self.caller_email(user_id).await?;
+        let invitation = self
+            .repo
+            .find_pending_invitation_for_email(invitation_id, &email)
+            .await
+            .map_err(Self::map_internal_error)?
+            .ok_or_else(|| Status::not_found("Invitation not found or no longer valid"))?;
+        self.repo
+            .accept_invitation_for_user(
+                &invitation.id,
+                &invitation.org_id,
+                user_id,
+                invitation.org_role,
+            )
+            .await
+            .map_err(Self::map_internal_error)?;
+        Ok(AcceptInvitationResponse {
+            org_id: invitation.org_id,
+            role: crate::converters::org_role_to_db(invitation.org_role).to_string(),
+        })
+    }
+
+    /// The caller turns down an invitation addressed to them.
+    pub async fn decline_my_invitation(
+        &self,
+        user_id: &str,
+        invitation_id: &str,
+    ) -> Result<(), Status> {
+        let email = self.caller_email(user_id).await?;
+        let n = self
+            .repo
+            .decline_invitation(invitation_id, &email)
+            .await
+            .map_err(Self::map_internal_error)?;
+        if n == 0 {
+            return Err(Status::not_found("Invitation not found or no longer valid"));
+        }
+        Ok(())
+    }
+
+    async fn caller_email(&self, user_id: &str) -> Result<String, Status> {
+        self.repo
+            .find_user_by_id(user_id)
+            .await
+            .map_err(Self::map_internal_error)?
+            .map(|u| u.email)
+            .ok_or_else(|| Status::unauthenticated("Unknown user"))
+    }
+
     pub async fn revoke_invitation(
         &self,
         caller_user_id: &str,

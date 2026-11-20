@@ -62,6 +62,17 @@ pub struct OrganizationInvitationRow {
     pub created_at: i64,
 }
 
+/// A pending invitation addressed to the caller, with what the invitee needs to decide.
+pub struct MyInvitationRow {
+    pub id: String,
+    pub org_id: String,
+    pub org_name: String,
+    pub inviter_name: String,
+    pub org_role: OrgRole,
+    pub expires_at: i64,
+    pub created_at: i64,
+}
+
 /// One row of `platform_settings` (encrypted secret). The caller is
 /// responsible for encryption/decryption — we just persist opaque bytes.
 pub struct PlatformSettingRow {
@@ -1126,6 +1137,109 @@ impl IdentityRepository {
                 })
             })
             .collect::<Result<Vec<_>, _>>()
+    }
+
+    /// Pending, unexpired invitations sent to `email`, newest first.
+    pub async fn find_pending_invitations_for_email(
+        &self,
+        email: &str,
+    ) -> Result<Vec<MyInvitationRow>, sqlx::Error> {
+        let invitations = table_name(philand_table::table::ORGANIZATION_INVITATIONS);
+        let orgs = table_name(philand_table::table::ORGANIZATIONS);
+        let users = table_name(philand_table::table::USERS);
+        let rows = sqlx::query(&format!(
+            "SELECT i.id, i.org_id, COALESCE(o.name, '') AS org_name, \
+                    COALESCE(NULLIF(u.display_name, ''), '') AS inviter_name, \
+                    i.org_role, i.expires_at, i.created_at \
+             FROM {invitations} i \
+             LEFT JOIN {orgs} o ON o.id = i.org_id \
+             LEFT JOIN {users} u ON u.id = i.inviter_id \
+             WHERE LOWER(i.invitee_email) = LOWER(?) AND i.status = ? AND i.expires_at > NOW() \
+             ORDER BY i.created_at DESC"
+        ))
+        .bind(email.trim())
+        .bind(invitation_status_to_db(InvitationStatus::IsPending))
+        .fetch_all(&*self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| -> Result<MyInvitationRow, sqlx::Error> {
+                Ok(MyInvitationRow {
+                    id: row.try_get("id")?,
+                    org_id: row.try_get("org_id")?,
+                    org_name: row.try_get("org_name")?,
+                    inviter_name: row.try_get("inviter_name")?,
+                    org_role: org_role_from_db(&row.try_get::<String, _>("org_role")?),
+                    expires_at: row
+                        .try_get::<DateTime<Utc>, _>("expires_at")
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0),
+                    created_at: row
+                        .try_get::<DateTime<Utc>, _>("created_at")
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0),
+                })
+            })
+            .collect()
+    }
+
+    /// The pending, unexpired invitation `invitation_id` if it is addressed to `email`.
+    pub async fn find_pending_invitation_for_email(
+        &self,
+        invitation_id: &str,
+        email: &str,
+    ) -> Result<Option<OrganizationInvitationRow>, sqlx::Error> {
+        let invitations = table_name(philand_table::table::ORGANIZATION_INVITATIONS);
+        let row = sqlx::query(&format!(
+            "SELECT id, org_id, inviter_id, invitee_email, org_role, status, expires_at, created_at \
+             FROM {invitations} \
+             WHERE id = ? AND LOWER(invitee_email) = LOWER(?) AND status = ? AND expires_at > NOW()"
+        ))
+        .bind(invitation_id)
+        .bind(email.trim())
+        .bind(invitation_status_to_db(InvitationStatus::IsPending))
+        .fetch_optional(&*self.pool)
+        .await?;
+        row.map(|row| -> Result<OrganizationInvitationRow, sqlx::Error> {
+            Ok(OrganizationInvitationRow {
+                id: row.try_get("id")?,
+                org_id: row.try_get("org_id")?,
+                inviter_id: row.try_get("inviter_id")?,
+                invitee_email: row.try_get("invitee_email")?,
+                org_role: org_role_from_db(&row.try_get::<String, _>("org_role")?),
+                status: invitation_status_from_db(&row.try_get::<String, _>("status")?),
+                expires_at: row
+                    .try_get::<DateTime<Utc>, _>("expires_at")
+                    .map(|dt| dt.timestamp())
+                    .unwrap_or(0),
+                created_at: row
+                    .try_get::<DateTime<Utc>, _>("created_at")
+                    .map(|dt| dt.timestamp())
+                    .unwrap_or(0),
+            })
+        })
+        .transpose()
+    }
+
+    /// The invitee turns a pending invitation down. Stored as `revoked`: there is no separate
+    /// "declined" status, and either way the invitation can no longer be used.
+    pub async fn decline_invitation(
+        &self,
+        invitation_id: &str,
+        email: &str,
+    ) -> Result<u64, sqlx::Error> {
+        let invitations = table_name(philand_table::table::ORGANIZATION_INVITATIONS);
+        let result = sqlx::query(&format!(
+            "UPDATE {invitations} SET status = ? \
+             WHERE id = ? AND LOWER(invitee_email) = LOWER(?) AND status = ?"
+        ))
+        .bind(invitation_status_to_db(InvitationStatus::IsRevoked))
+        .bind(invitation_id)
+        .bind(email.trim())
+        .bind(invitation_status_to_db(InvitationStatus::IsPending))
+        .execute(&*self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 
     pub async fn revoke_invitation(
