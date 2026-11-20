@@ -392,6 +392,23 @@ pub struct OrgInvitationResponse {
 }
 
 #[derive(Serialize, ToSchema)]
+pub struct MyInvitationResponse {
+    pub id: String,
+    pub org_id: String,
+    pub org_name: String,
+    /// Display name of whoever sent it; empty when unknown.
+    pub inviter_name: String,
+    pub org_role: String,
+    pub expires_at: i64,
+    pub created_at: i64,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct ListMyInvitationsResponse {
+    pub invitations: Vec<MyInvitationResponse>,
+}
+
+#[derive(Serialize, ToSchema)]
 pub struct ListOrgInvitationsResponse {
     pub invitations: Vec<OrgInvitationResponse>,
 }
@@ -1562,6 +1579,98 @@ async fn list_org_invitations(
     Ok(Json(ListOrgInvitationsResponse { invitations }))
 }
 
+/// Pending invitations addressed to the caller's email, so they can be answered in the app.
+#[utoipa::path(
+    get,
+    path = "/me/invitations",
+    responses(
+        (status = 200, description = "Pending invitations for the caller", body = ListMyInvitationsResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "organizations"
+)]
+async fn list_my_invitations(
+    State(biz): State<HttpState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<ListMyInvitationsResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let user_id = extract_user_id_from_jwt(&biz, &headers).await?;
+    let rows = biz
+        .list_my_invitations(&user_id)
+        .await
+        .map_err(|e| map_status(&e))?;
+    Ok(Json(ListMyInvitationsResponse {
+        invitations: rows
+            .into_iter()
+            .map(|r| MyInvitationResponse {
+                id: r.id,
+                org_id: r.org_id,
+                org_name: r.org_name,
+                inviter_name: r.inviter_name,
+                org_role: org_role_label(r.org_role as i32),
+                expires_at: r.expires_at,
+                created_at: r.created_at,
+            })
+            .collect(),
+    }))
+}
+
+/// Accept an invitation addressed to the caller (no emailed token needed).
+#[utoipa::path(
+    post,
+    path = "/me/invitations/{invitation_id}/accept",
+    params(("invitation_id" = String, Path, description = "Invitation ID")),
+    responses(
+        (status = 200, description = "Joined the organization", body = AcceptInvitationResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 404, description = "Invitation not found or no longer valid", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "organizations"
+)]
+async fn accept_my_invitation(
+    State(biz): State<HttpState>,
+    Path(invitation_id): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<AcceptInvitationResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let user_id = extract_user_id_from_jwt(&biz, &headers).await?;
+    let resp = biz
+        .accept_my_invitation(&user_id, &invitation_id)
+        .await
+        .map_err(|e| map_status(&e))?;
+    Ok(Json(AcceptInvitationResponse {
+        org_id: resp.org_id,
+        role: resp.role,
+    }))
+}
+
+/// Decline an invitation addressed to the caller.
+#[utoipa::path(
+    post,
+    path = "/me/invitations/{invitation_id}/decline",
+    params(("invitation_id" = String, Path, description = "Invitation ID")),
+    responses(
+        (status = 200, description = "Invitation declined", body = SimpleMessageResponse),
+        (status = 401, description = "Missing or invalid token", body = ErrorResponse),
+        (status = 404, description = "Invitation not found or no longer valid", body = ErrorResponse),
+    ),
+    security(("bearer_auth" = [])),
+    tag = "organizations"
+)]
+async fn decline_my_invitation(
+    State(biz): State<HttpState>,
+    Path(invitation_id): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<SimpleMessageResponse>, (StatusCode, Json<ErrorResponse>)> {
+    let user_id = extract_user_id_from_jwt(&biz, &headers).await?;
+    biz.decline_my_invitation(&user_id, &invitation_id)
+        .await
+        .map_err(|e| map_status(&e))?;
+    Ok(Json(SimpleMessageResponse {
+        message: "Invitation declined".to_string(),
+    }))
+}
+
 /// Revoke a pending invitation (owner/admin).
 #[utoipa::path(
     delete,
@@ -1993,6 +2102,7 @@ async fn extract_token_and_claims(
         logout, refresh_token, change_password, forgot_password, reset_password,
         list_org_members, invite_member, accept_invitation, change_org_member_role, remove_org_member,
         transfer_ownership, rename_organization, list_org_invitations, revoke_invitation,
+        list_my_invitations, accept_my_invitation, decline_my_invitation,
         list_users, get_user, create_user, update_user, delete_user,
         list_organizations_admin, get_organization_admin, create_organization_admin,
         update_organization_admin, delete_organization_admin,
@@ -2014,7 +2124,7 @@ async fn extract_token_and_claims(
         AcceptInvitationResponse,
         ChangeOrgMemberRoleRequest,
         TransferOwnershipRequest, RenameOrganizationRequest,
-        OrgInvitationResponse, ListOrgInvitationsResponse,
+        OrgInvitationResponse, ListOrgInvitationsResponse, MyInvitationResponse, ListMyInvitationsResponse,
         SimpleMessageResponse,
         ListUsersResponse, GetUserResponse,
         CreateUserRequest, CreateUserResponse,
@@ -2083,6 +2193,16 @@ pub fn router() -> Router<HttpState> {
             delete(revoke_invitation),
         )
         .route("/invitations/{token}/accept", post(accept_invitation))
+        // Invitations addressed to the caller
+        .route("/me/invitations", get(list_my_invitations))
+        .route(
+            "/me/invitations/{invitation_id}/accept",
+            post(accept_my_invitation),
+        )
+        .route(
+            "/me/invitations/{invitation_id}/decline",
+            post(decline_my_invitation),
+        )
         .route(
             "/organizations/{org_id}/members/{user_id}/role",
             patch(change_org_member_role),
