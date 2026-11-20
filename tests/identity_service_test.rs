@@ -731,3 +731,108 @@ async fn test_p1_non_member_cannot_list_org_members() {
     assert!(res.is_err());
     assert_eq!(res.unwrap_err().code(), tonic::Code::PermissionDenied);
 }
+
+/// Registers a user and returns (access token, user id, first org id).
+async fn register_and_login(
+    client: &mut IdentityServiceClient<tonic::transport::Channel>,
+    email: &str,
+    name: &str,
+) -> (String, String, String) {
+    let registered = client
+        .register(Request::new(RegisterRequest {
+            email: email.to_string(),
+            password: "password123".to_string(),
+            display_name: name.to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    let user_id = registered
+        .user
+        .as_ref()
+        .and_then(|u| u.base.as_ref())
+        .map(|b| b.id.clone())
+        .unwrap();
+    let login = client
+        .login(Request::new(LoginRequest {
+            email: email.to_string(),
+            password: "password123".to_string(),
+        }))
+        .await
+        .unwrap()
+        .into_inner();
+    let org_id = login.organizations[0].base.as_ref().unwrap().id.clone();
+    (login.access_token, user_id, org_id)
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn test_invitee_answers_invitations_in_app() {
+    let (mut client, pool) = setup().await;
+    let (owner_token, _, org_id) =
+        register_and_login(&mut client, "owner-me@example.com", "Owner Me").await;
+    let (_, invitee_id, _) =
+        register_and_login(&mut client, "invitee-me@example.com", "Invitee Me").await;
+    let (_, stranger_id, _) =
+        register_and_login(&mut client, "stranger-me@example.com", "Stranger").await;
+
+    // Two invitations to the same person (email matched case-insensitively).
+    for _ in 0..2 {
+        client
+            .invite_member(with_bearer(
+                InviteMemberRequest {
+                    org_id: org_id.clone(),
+                    invitee_email: "Invitee-Me@Example.com".to_string(),
+                    org_role: OrgRole::OrMember as i32,
+                },
+                &owner_token,
+            ))
+            .await
+            .unwrap();
+    }
+
+    let config = philand_configs::IdentityServiceConfig::from_env().expect("identity config");
+    let biz = IdentityBiz::new(
+        IdentityRepository::from_pool(Arc::new(pool.clone())),
+        config,
+        None,
+        Arc::new(philand_notify::NoopMailer::new()),
+    );
+
+    let mine = biz.list_my_invitations(&invitee_id).await.unwrap();
+    assert!(!mine.is_empty());
+    assert_eq!(mine[0].org_id, org_id);
+    assert_eq!(mine[0].inviter_name, "Owner Me");
+    assert!(biz
+        .list_my_invitations(&stranger_id)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // Nobody else can answer it.
+    let first = mine[0].id.clone();
+    assert_eq!(
+        biz.accept_my_invitation(&stranger_id, &first)
+            .await
+            .unwrap_err()
+            .code(),
+        tonic::Code::NotFound
+    );
+
+    let accepted = biz.accept_my_invitation(&invitee_id, &first).await.unwrap();
+    assert_eq!(accepted.org_id, org_id);
+    assert_eq!(accepted.role, "member");
+    // Accepting twice is not possible.
+    assert!(biz.accept_my_invitation(&invitee_id, &first).await.is_err());
+
+    for inv in biz.list_my_invitations(&invitee_id).await.unwrap() {
+        biz.decline_my_invitation(&invitee_id, &inv.id)
+            .await
+            .unwrap();
+    }
+    assert!(biz
+        .list_my_invitations(&invitee_id)
+        .await
+        .unwrap()
+        .is_empty());
+}
